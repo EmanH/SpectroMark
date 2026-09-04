@@ -828,8 +828,7 @@ namespace WavMarker.Sync
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Could not save the session:
-" + ex.Message, "SpectroMark", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show("Could not save the session: " + ex.Message, "SpectroMark", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -857,8 +856,7 @@ namespace WavMarker.Sync
             if (!ConfirmDiscard()) return;
             SessionState st;
             try { st = JsonSerializer.Deserialize<SessionState>(File.ReadAllText(path), new JsonSerializerOptions { NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }); }
-            catch (Exception ex) { MessageBox.Show("Could not read the session:
-" + ex.Message, "SpectroMark", MessageBoxButton.OK, MessageBoxImage.Error); return; }
+            catch (Exception ex) { MessageBox.Show("Could not read the session: " + ex.Message, "SpectroMark", MessageBoxButton.OK, MessageBoxImage.Error); return; }
             StopPlayback(); tracks.Clear(); viewLen = 0; loadingSession = true;
             if (Enum.TryParse<StretchMode>(st.Mode, out var m)) { mode = m; ModeBox.SelectedIndex = Array.IndexOf(StretchEngine.Modes, mode); }
             await AddFiles(st.Tracks.Select(t => t.Path).Where(File.Exists).ToArray());
