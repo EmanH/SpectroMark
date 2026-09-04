@@ -590,6 +590,8 @@ namespace WavMarker.Sync
             switch (e.Key)
             {
                 case Key.Space: TogglePlay(); return true;
+                case Key.M: AddMarkerToSelected(); return true;
+                case Key.Delete: DeleteHoveredMarker(); return true;
                 case Key.S when ctrl && shift: SaveSession(true); return true;
                 case Key.S when ctrl: SaveSession(false); return true;
                 case Key.Home: SeekTo(0); viewStart = 0; ViewChanged(); return true;
@@ -720,6 +722,54 @@ namespace WavMarker.Sync
             InvalidateLanes(); RefreshOverlay(); RefreshPlayhead(); RebuildHeaders();
         }
 
+        // ---------------- manual markers ----------------
+
+        void AddMarkerToSelected()
+        {
+            if (selectedLane < 0 || selectedLane >= tracks.Count) { Warn("Select a lane first (click it), then press M to add a marker at the playhead."); return; }
+            var t = tracks[selectedLane];
+            long pos = playing ? CurrentSample() : playhead;
+            long src = t.TimelineToSource(pos);
+            if (src < 0 || src >= t.Audio.Length) { Warn("The playhead is outside that clip."); return; }
+            if (t.Markers.Any(m => Math.Abs(m.Sample - src) < sampleRate * 0.01)) return;
+            PushUndo();
+            t.Markers.Add(new Marker { Sample = src }); t.Markers.Sort((a, b) => a.Sample.CompareTo(b.Sample));
+            t.MarkersDirty = true;
+            RefreshOverlay(); RebuildHeaders();
+            SetStatus($"Marker added to {t.Name} @ {FormatTime((double)pos / sampleRate)}  (written into the WAV on save)");
+        }
+
+        void DeleteHoveredMarker()
+        {
+            if (hover.m == null || hover.t == null) { Warn("Hover a marker and press Delete to remove it."); return; }
+            var t = hover.t; var m = hover.m;
+            PushUndo();
+            var pt = t.PointAt(m.Sample); if (pt != null) t.RemovePoint(pt);
+            t.Markers.Remove(m); t.MarkersDirty = true; hover = (null, null);
+            ScheduleRender(t); RefreshOverlay(); RebuildHeaders();
+            SetStatus($"Marker removed from {t.Name}");
+        }
+
+        /// <summary>Write changed marker lists back into their WAV files (cue chunks).</summary>
+        int SaveMarkersToWavs()
+        {
+            int n = 0;
+            foreach (var t in tracks.Where(t => t.MarkersDirty))
+            {
+                try { WavCues.Write(t.Path, t.Markers); t.MarkersDirty = false; n++; }
+                catch (Exception ex) { MessageBox.Show($"Could not write markers into {t.Name}: {ex.Message}", "SpectroMark", MessageBoxButton.OK, MessageBoxImage.Error); }
+            }
+            return n;
+        }
+
+        void SaveMarkers_Click(object sender, RoutedEventArgs e)
+        {
+            bool was = playing; if (was) StopPlayback();
+            int n = SaveMarkersToWavs();
+            SetStatus(n > 0 ? $"Markers written into {n} WAV file(s)" : "No marker changes to write");
+            if (was) StartPlayback();
+        }
+
         // ---------------- sync logic ----------------
 
         // A sync group: every Ctrl-click adds that lane's marker; the group's time is the robust centre of all
@@ -817,7 +867,7 @@ namespace WavMarker.Sync
 
         // ---------------- undo / session ----------------
 
-        class TrackState { public string Path { get; set; } public long Offset { get; set; } public bool Mute { get; set; } public bool Solo { get; set; } public List<long[]> Points { get; set; } = new(); }
+        class TrackState { public string Path { get; set; } public long Offset { get; set; } public bool Mute { get; set; } public bool Solo { get; set; } public List<long[]> Points { get; set; } = new(); public List<long> Markers { get; set; } public List<string> MarkerNames { get; set; } }
         class SessionState
         {
             public int SampleRate { get; set; } public string Mode { get; set; } public List<TrackState> Tracks { get; set; } = new();
@@ -870,7 +920,7 @@ namespace WavMarker.Sync
         SessionState Capture() => new()
         {
             SampleRate = sampleRate, Mode = mode.ToString(),
-            Tracks = tracks.Select(t => new TrackState { Path = t.Path, Offset = t.Offset, Mute = t.Mute, Solo = t.Solo, Points = t.Points.Select(p => new[] { p.Source, p.Target, p.BaseTime }).ToList() }).ToList()
+            Tracks = tracks.Select(t => new TrackState { Path = t.Path, Offset = t.Offset, Mute = t.Mute, Solo = t.Solo, Points = t.Points.Select(p => new[] { p.Source, p.Target, p.BaseTime }).ToList(), Markers = t.Markers.Select(m => m.Sample).ToList(), MarkerNames = t.Markers.Select(m => m.Name ?? "").ToList() }).ToList()
         };
 
         void ApplyState(SessionState st)
@@ -880,6 +930,11 @@ namespace WavMarker.Sync
                 var t = tracks.FirstOrDefault(x => string.Equals(x.Path, ts.Path, StringComparison.OrdinalIgnoreCase));
                 if (t == null) continue;
                 t.Offset = ts.Offset; t.Mute = ts.Mute; t.Solo = ts.Solo;
+                if (ts.Markers != null && !loadingSession)
+                {
+                    var restored = ts.Markers.Select((smp, i) => new Marker { Sample = smp, Name = ts.MarkerNames != null && i < ts.MarkerNames.Count ? ts.MarkerNames[i] : "" }).ToList();
+                    if (restored.Count != t.Markers.Count || restored.Zip(t.Markers).Any(z => z.First.Sample != z.Second.Sample)) { t.Markers = restored; t.MarkersDirty = true; }
+                }
                 t.Points = ts.Points.Select(p => new StretchPoint { Source = p[0], Target = p[1], BaseTime = p.Length > 2 ? p[2] : -1 }).OrderBy(p => p.Source).ToList();
                 t.RenderVersion++;
                 ScheduleRender(t);
@@ -907,8 +962,11 @@ namespace WavMarker.Sync
             {
                 var opts = new JsonSerializerOptions { WriteIndented = true, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
                 File.WriteAllText(sessionPath, JsonSerializer.Serialize(CaptureFull(), opts));
+                bool was = playing; if (was) StopPlayback();
+                int n = SaveMarkersToWavs();
+                if (was) StartPlayback();
                 SetDirty(false);
-                SetStatus("Session saved: " + System.IO.Path.GetFileName(sessionPath));
+                SetStatus("Session saved: " + System.IO.Path.GetFileName(sessionPath) + (n > 0 ? $"   (markers written into {n} WAV file(s))" : ""));
             }
             catch (Exception ex)
             {

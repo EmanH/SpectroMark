@@ -11,6 +11,7 @@
                 <Button Content="Open Session" Click="OpenSession_Click"/>
                 <Button Content="Save Session" Click="SaveSession_Click" ToolTip="Ctrl+S"/>
                 <Button Content="Save As..." Click="SaveSessionAs_Click" ToolTip="Ctrl+Shift+S"/>
+                <Button Content="Write Markers to WAVs" Click="SaveMarkers_Click" ToolTip="Write added/removed markers into the WAV files (also happens on Save Session)"/>
                 <Button Content="Export Synced WAVs..." Click="Export_Click" Background="#16323e" BorderBrush="#2c5a70" Foreground="#7FD7FF"/>
                 <TextBlock Text="Playhead" Margin="12,0,4,0"/>
                 <ToggleButton x:Name="FollowBtn" Content="Page" IsChecked="False" Click="Follow_Click" ToolTip="Checked: playhead stays centred and the view scrolls continuously.  Unchecked: view pages when the playhead reaches the edge."/>
@@ -23,7 +24,7 @@
         </Border>
         <Border DockPanel.Dock="Bottom" Background="#1e1e1e" Padding="10,3" BorderBrush="#333" BorderThickness="0,1,0,0">
             <TextBlock FontSize="11" Foreground="#888"
-                       Text="Ctrl+click one marker per lane: they snap to the centre of the group (recomputed per click)   Ctrl+drag a box over several lanes: 1st markers form group 1, 2nd form group 2 ... each centred   Alt+click a synced marker: remove that sync point   Click a lane: select + seek   Hold S: solo the selected lane   Drag a lane: move clip   Space: play   Wheel: zoom   Shift+Wheel: pan   Ctrl+Wheel: lane height   Wheel over headers: scroll lanes   Ctrl+Z / Ctrl+Shift+Z: undo / redo"/>
+                       Text="Ctrl+click one marker per lane: they snap to the centre of the group (recomputed per click)   Ctrl+drag a box over several lanes: 1st markers form group 1, 2nd form group 2 ... each centred   Alt+click a synced marker: remove that sync point   Click a lane: select + seek   M: add marker to selected lane at playhead   Delete: remove hovered marker   Hold S: solo the selected lane   Drag a lane: move clip   Space: play   Wheel: zoom   Shift+Wheel: pan   Ctrl+Wheel: lane height   Wheel over headers: scroll lanes   Ctrl+Z / Ctrl+Shift+Z: undo / redo"/>
         </Border>
         <Grid>
             <Grid.ColumnDefinitions>

@@ -27,6 +27,7 @@ namespace WavMarker.Sync
         public string Name => System.IO.Path.GetFileNameWithoutExtension(Path);
         public AudioData Audio;
         public List<Marker> Markers = new();
+        public bool MarkersDirty;                   // markers changed since last written into the WAV
         public long Offset;                         // timeline frame where local 0 sits
         public List<StretchPoint> Points = new();   // sorted by Source; the first is always a pin (Source == Target)
         public bool Mute, Solo;
