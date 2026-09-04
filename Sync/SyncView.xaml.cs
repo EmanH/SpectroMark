@@ -41,6 +41,7 @@ namespace WavMarker.Sync
         int pressLane = -1; double pressX; long pressOffset; bool draggingClip, pressed;
         int selectedLane = -1;
         SyncTrack tempSolo;            // lane soloed while S is held
+        bool bandActive, bandDragging; Point bandStart, bandEnd;   // Ctrl+drag batch-sync selection
         (SyncTrack t, Marker m) hover;
 
         // undo
@@ -380,6 +381,62 @@ namespace WavMarker.Sync
                 double ax = SampleToX(anchorTime);
                 dc.DrawLine(AnchorPen, new Point(ax, 0), new Point(ax, LaneHost.ActualHeight));
             }
+            if (bandActive && bandDragging)
+            {
+                var r = new Rect(bandStart, bandEnd);
+                dc.DrawRectangle(BandSelFill, BandSelPen, r);
+            }
+        }
+
+        static readonly Brush BandSelFill = Freeze(new SolidColorBrush(Color.FromArgb(40, 79, 179, 232)));
+        static readonly Pen BandSelPen = Freeze(new Pen(new SolidColorBrush(Color.FromArgb(200, 79, 179, 232)), 1) { DashStyle = new DashStyle(new double[] { 3, 2 }, 0) });
+
+        /// <summary>
+        /// Batch sync: every lane touched by the rectangle contributes the markers inside its time range, in order.
+        /// The k-th marker of each lane forms group k; each group is centred on its own (robust centre of the
+        /// original positions) and applied in time order. One undo step.
+        /// </summary>
+        void BatchSync(Point a, Point b)
+        {
+            if (tracks.Count == 0) return;
+            double x0 = Math.Min(a.X, b.X), x1 = Math.Max(a.X, b.X), y0 = Math.Min(a.Y, b.Y), y1 = Math.Max(a.Y, b.Y);
+            long t0 = (long)XToSample(x0), t1 = (long)XToSample(x1);
+            var lanes = new List<(SyncTrack t, List<Marker> ms, long baseOffset, bool hadPoints)>();
+            for (int i = 0; i < tracks.Count; i++)
+            {
+                double top = LaneTop(i), bot = top + LaneH;
+                if (bot < y0 || top > y1) continue;
+                var t = tracks[i];
+                var ms = t.Markers.Where(m => { long tl = t.SourceToTimeline(m.Sample); return tl >= t0 && tl <= t1; }).OrderBy(m => m.Sample).ToList();
+                if (ms.Count > 0) lanes.Add((t, ms, t.Offset, t.Points.Count > 0));
+            }
+            if (lanes.Count < 2) { Warn("Select a range covering markers on at least two lanes."); return; }
+            int groups = lanes.Max(l => l.ms.Count);
+            int minCount = lanes.Min(l => l.ms.Count);
+            PushUndo();
+            // original positions for every marker, captured before anything moves
+            var baseTimes = lanes.ToDictionary(l => l.t, l => l.ms.Select(m => l.t.SourceToTimeline(m.Sample)).ToList());
+            for (int k = 0; k < groups; k++)
+            {
+                var members = lanes.Where(l => k < l.ms.Count).ToList();
+                if (members.Count < 2) continue;
+                long centre = RobustCentre(members.Select(l => baseTimes[l.t][k]).ToList());
+                foreach (var l in members)
+                {
+                    var t = l.t; var m = l.ms[k]; long bt = baseTimes[t][k];
+                    if (t.Points.Count == 0)
+                    {
+                        t.Offset = t.Offset + (centre - t.SourceToTimeline(m.Sample));
+                        t.AddOrUpdatePoint(m.Sample, m.Sample, bt);
+                    }
+                    else t.AddOrUpdatePoint(m.Sample, centre - t.Offset, bt);
+                }
+            }
+            foreach (var l in lanes) ScheduleRender(l.t);
+            RefreshOverlay(); RebuildHeaders(); UpdateScrollBar(); UpdateTime(); InvalidateNav();
+            string note = minCount != groups ? $"   (lanes had between {minCount} and {groups} markers in the range: check the alignment)" : "";
+            SetStatus($"Batch sync: {groups} group(s) across {lanes.Count} lanes" + note);
+            SyncHint.Text = $"Batch sync: {groups} group(s) across {lanes.Count} lanes" + note;
         }
 
         static readonly Pen PlayheadGlow = Freeze(new Pen(new SolidColorBrush(Color.FromArgb(70, 255, 255, 255)), 7));
@@ -567,6 +624,7 @@ namespace WavMarker.Sync
             if (e.ChangedButton == MouseButton.Left)
             {
                 if (sHeld && m != null) { SyncClick(t, m); return; }
+                if (sHeld) { bandActive = true; bandDragging = false; bandStart = bandEnd = p; LaneHost.CaptureMouse(); return; }
                 if (m != null && Keyboard.Modifiers.HasFlag(ModifierKeys.Alt))
                 {
                     var pt = t.PointAt(m.Sample);
@@ -585,6 +643,13 @@ namespace WavMarker.Sync
         {
             if (tracks.Count == 0) return;
             var p = e.GetPosition(LaneHost);
+            if (bandActive)
+            {
+                bandEnd = p;
+                if (!bandDragging && (Math.Abs(p.X - bandStart.X) >= 4 || Math.Abs(p.Y - bandStart.Y) >= 4)) bandDragging = true;
+                RefreshOverlay();
+                return;
+            }
             if (pressed && pressLane >= 0)
             {
                 if (!draggingClip && Math.Abs(p.X - pressX) >= 4) { PushUndo(); draggingClip = true; }
@@ -604,6 +669,13 @@ namespace WavMarker.Sync
 
         void Lane_MouseUp(object sender, MouseButtonEventArgs e)
         {
+            if (bandActive && e.ChangedButton == MouseButton.Left)
+            {
+                bandActive = false; LaneHost.ReleaseMouseCapture();
+                if (bandDragging) BatchSync(bandStart, bandEnd);
+                bandDragging = false; RefreshOverlay();
+                return;
+            }
             if (!pressed) return;
             var p = e.GetPosition(LaneHost);
             pressed = false; LaneHost.ReleaseMouseCapture();
