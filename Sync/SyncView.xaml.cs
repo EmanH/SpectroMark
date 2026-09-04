@@ -578,12 +578,13 @@ namespace WavMarker.Sync
                 else if (!down) { sHeld = false; anchorTrack = null; group.Clear(); SyncHint.Text = ""; Mouse.OverrideCursor = null; RefreshOverlay(); }
                 return false;   // let Ctrl combos (Ctrl+Z, Ctrl+S ...) still work
             }
-            if (e.Key == Key.S && Keyboard.Modifiers == ModifierKeys.None)
+            if ((e.Key == Key.S && Keyboard.Modifiers == ModifierKeys.None) || e.Key == Key.LeftShift || e.Key == Key.RightShift)
             {
+                if (e.Key != Key.S && Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) return false;   // Ctrl+Shift combos untouched
                 var sel = selectedLane >= 0 && selectedLane < tracks.Count ? tracks[selectedLane] : null;
                 if (down) { if (tempSolo == null && sel != null) { tempSolo = sel; SetStatus($"Solo (held): {sel.Name}"); InvalidateLanes(); RebuildHeaders(); } }
                 else if (tempSolo != null) { tempSolo = null; SetStatus(""); InvalidateLanes(); RebuildHeaders(); }
-                return true;
+                return e.Key == Key.S;   // Shift itself must stay unhandled so Shift+wheel and Shift+arrows still work
             }
             if (!down) return false;
             bool ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control), shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);

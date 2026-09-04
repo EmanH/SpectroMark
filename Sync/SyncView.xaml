@@ -24,7 +24,7 @@
         </Border>
         <Border DockPanel.Dock="Bottom" Background="#1e1e1e" Padding="10,3" BorderBrush="#333" BorderThickness="0,1,0,0">
             <TextBlock FontSize="11" Foreground="#888"
-                       Text="Ctrl+click one marker per lane: they snap to the centre of the group (recomputed per click)   Ctrl+drag a box over several lanes: 1st markers form group 1, 2nd form group 2 ... each centred   Alt+click a synced marker: remove that sync point   Click a lane: select + seek   M: add marker to selected lane at playhead   Delete: remove hovered marker   Hold S: solo the selected lane   Drag a lane: move clip   Space: play   Wheel: zoom   Shift+Wheel: pan   Ctrl+Wheel: lane height   Wheel over headers: scroll lanes   Ctrl+Z / Ctrl+Shift+Z: undo / redo"/>
+                       Text="Ctrl+click one marker per lane: they snap to the centre of the group (recomputed per click)   Ctrl+drag a box over several lanes: 1st markers form group 1, 2nd form group 2 ... each centred   Alt+click a synced marker: remove that sync point   Click a lane: select + seek   M: add marker to selected lane at playhead   Delete: remove hovered marker   Hold S or Shift: solo the selected lane   Drag a lane: move clip   Space: play   Wheel: zoom   Shift+Wheel: pan   Ctrl+Wheel: lane height   Wheel over headers: scroll lanes   Ctrl+Z / Ctrl+Shift+Z: undo / redo"/>
         </Border>
         <Grid>
             <Grid.ColumnDefinitions>
