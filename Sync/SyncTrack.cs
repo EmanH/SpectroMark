@@ -140,8 +140,10 @@ namespace WavMarker.Sync
             return null;
         }
 
+        /// <summary>Adds the point unconditionally. Any existing points it would conflict with (time running backwards) are removed: the newest click wins.</summary>
         public void AddOrUpdatePoint(long source, long localTarget)
         {
+            Points.RemoveAll(p => p.Source != source && ((p.Source < source && p.Target >= localTarget) || (p.Source > source && p.Target <= localTarget)));
             var existing = PointAt(source);
             if (existing != null) existing.Target = localTarget;
             else Points.Add(new StretchPoint { Source = source, Target = localTarget });

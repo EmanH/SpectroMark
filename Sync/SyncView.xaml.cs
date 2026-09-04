@@ -470,11 +470,11 @@ namespace WavMarker.Sync
 
         public bool HandleKey(KeyEventArgs e, bool down)
         {
-            if (e.Key == Key.S && Keyboard.Modifiers == ModifierKeys.None)
+            if (e.Key == Key.LeftCtrl || e.Key == Key.RightCtrl)
             {
                 if (down && !sHeld) { sHeld = true; anchorTrack = null; groupCount = 0; SyncHint.Text = "SYNC: click the anchor marker"; Mouse.OverrideCursor = Cursors.Cross; RefreshOverlay(); }
                 else if (!down) { sHeld = false; anchorTrack = null; SyncHint.Text = ""; Mouse.OverrideCursor = null; RefreshOverlay(); }
-                return true;
+                return false;   // let Ctrl combos (Ctrl+Z, Ctrl+S ...) still work
             }
             if (!down) return false;
             bool ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control), shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
@@ -612,7 +612,15 @@ namespace WavMarker.Sync
                 SyncHint.Text = $"SYNC anchor: {t.Name} @ {FormatTime((double)anchorTime / sampleRate)}  - click markers on other lanes";
                 RefreshOverlay(); return;
             }
-            if (t == anchorTrack) { Warn("That lane is the anchor. Click a marker on another lane, or release S and start a new group."); return; }
+            if (t == anchorTrack)
+            {
+                // clicked another marker on the anchor lane: it becomes the new anchor for this group
+                anchorTime = t.SourceToTimeline(m.Sample);
+                if (t.PointAt(m.Sample) == null) { PushUndo(); t.AddOrUpdatePoint(m.Sample, t.SourceToLocal(m.Sample)); ScheduleRender(t); RebuildHeaders(); }
+                RefreshOverlay();
+                SyncHint.Text = $"SYNC anchor moved: {t.Name} @ {FormatTime((double)anchorTime / sampleRate)}";
+                return;
+            }
             PushUndo();
             if (t.Points.Count == 0)
             {
@@ -622,8 +630,6 @@ namespace WavMarker.Sync
             else
             {
                 long localTarget = anchorTime - t.Offset;
-                string err = t.CheckPoint(m.Sample, localTarget);
-                if (err != null) { undo.Pop(); Warn("Not synced: " + err); return; }
                 t.AddOrUpdatePoint(m.Sample, localTarget);
                 var prev = t.Points.Where(p => p.Source < m.Sample).LastOrDefault();
                 if (prev != null) SetStatus($"{t.Name}: stretched {(double)(localTarget - prev.Target) / Math.Max(1, m.Sample - prev.Source):0.000}x between sync points");
