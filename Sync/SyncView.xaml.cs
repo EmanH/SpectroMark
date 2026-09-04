@@ -39,6 +39,8 @@ namespace WavMarker.Sync
 
         // mouse
         int pressLane = -1; double pressX; long pressOffset; bool draggingClip, pressed;
+        int selectedLane = -1;
+        SyncTrack tempSolo;            // lane soloed while S is held
         (SyncTrack t, Marker m) hover;
 
         // undo
@@ -126,7 +128,7 @@ namespace WavMarker.Sync
         void RemoveTrack(SyncTrack t)
         {
             StopPlayback();
-            tracks.Remove(t); SetDirty(true);
+            tracks.Remove(t); SetDirty(true); if (selectedLane >= tracks.Count) selectedLane = tracks.Count - 1; if (tempSolo == t) tempSolo = null;
             RebuildHeaders(); ViewChanged(); InvalidateNav();
         }
 
@@ -183,8 +185,9 @@ namespace WavMarker.Sync
                 rm.Click += (_, _) => RemoveTrack(t);
                 row.Children.Add(mute); row.Children.Add(solo); row.Children.Add(rm);
                 panel.Children.Add(row);
-                panel.Children.Add(new TextBlock { Text = (t.Rendering ? "rendering...  " : "") + $"{t.Points.Count} sync pt", Foreground = Brushes.Gray, FontSize = 10, Margin = new Thickness(0, 3, 0, 0) });
-                Headers.Children.Add(new Border { Height = h, Child = panel, BorderBrush = new SolidColorBrush(Color.FromRgb(40, 40, 40)), BorderThickness = new Thickness(0, 0, 0, 1), Background = new SolidColorBrush(i % 2 == 0 ? Color.FromRgb(26, 26, 26) : Color.FromRgb(22, 22, 22)) });
+                panel.Children.Add(new TextBlock { Text = (tempSolo == t ? "SOLO (S)  " : "") + (t.Rendering ? "rendering...  " : "") + $"{t.Points.Count} sync pt", Foreground = tempSolo == t ? Brushes.LightGreen : Brushes.Gray, FontSize = 10, Margin = new Thickness(0, 3, 0, 0) });
+                bool selectedHdr = i == selectedLane;
+                Headers.Children.Add(new Border { Height = h, Child = panel, BorderBrush = selectedHdr ? new SolidColorBrush(Color.FromRgb(79, 179, 232)) : new SolidColorBrush(Color.FromRgb(40, 40, 40)), BorderThickness = selectedHdr ? new Thickness(3, 0, 0, 1) : new Thickness(0, 0, 0, 1), Background = new SolidColorBrush(selectedHdr ? Color.FromRgb(34, 38, 46) : i % 2 == 0 ? Color.FromRgb(26, 26, 26) : Color.FromRgb(22, 22, 22)) });
             }
         }
 
@@ -273,12 +276,13 @@ namespace WavMarker.Sync
                     var t = tracks[i];
                     int top = (int)(LaneTop(i) * dpiScale), center = top + laneH / 2;
                     if (top + laneH <= 0 || top >= H) continue;
-                    int bg = i % 2 == 0 ? unchecked((int)0xFF101010) : unchecked((int)0xFF0C0C0C);
+                    bool selected = i == selectedLane;
+                    int bg = selected ? unchecked((int)0xFF1a1c22) : i % 2 == 0 ? unchecked((int)0xFF101010) : unchecked((int)0xFF0C0C0C);
                     for (int y = Math.Max(0, top); y < Math.Min(H, top + laneH); y++) for (int x = 0; x < W; x++) px[y * W + x] = bg;
-                    bool dim = t.Mute || (anySolo && !t.Solo);
+                    bool dim = t.Mute || (anySolo && !t.Solo) || (tempSolo != null && tempSolo != t);
                     var c = Palette[i % Palette.Length];
                     int col = dim ? unchecked((int)0xFF505050) : (255 << 24) | (c.R << 16) | (c.G << 8) | c.B;
-                    int clipBg = dim ? unchecked((int)0xFF161616) : unchecked((int)0xFF1a1f26);
+                    int clipBg = dim ? unchecked((int)0xFF161616) : selected ? unchecked((int)0xFF22293a) : unchecked((int)0xFF1a1f26);
                     int amp = laneH / 2 - 4;
                     int Wl = W; var pxl = px;
                     Parallel.For(0, Wl, x =>
@@ -472,7 +476,7 @@ namespace WavMarker.Sync
         {
             if (tracks.Count == 0) return;
             if (playhead >= EndFrame - 1) playhead = 0;
-            var prov = new SyncMixProvider(tracks, sampleRate, playhead, EndFrame);
+            var prov = new SyncMixProvider(tracks, sampleRate, playhead, EndFrame) { TempSolo = () => tempSolo };
             playStart = playhead;
             engine.Start(prov);
             playing = true; timer.Start(); PlayBtn.Content = "Pause  (Space)";
@@ -516,6 +520,13 @@ namespace WavMarker.Sync
                 if (down && !sHeld) { sHeld = true; anchorTrack = null; group.Clear(); groupCount = 0; SyncHint.Text = "SYNC: click the first marker of a group"; Mouse.OverrideCursor = Cursors.Cross; RefreshOverlay(); }
                 else if (!down) { sHeld = false; anchorTrack = null; group.Clear(); SyncHint.Text = ""; Mouse.OverrideCursor = null; RefreshOverlay(); }
                 return false;   // let Ctrl combos (Ctrl+Z, Ctrl+S ...) still work
+            }
+            if (e.Key == Key.S && Keyboard.Modifiers == ModifierKeys.None)
+            {
+                var sel = selectedLane >= 0 && selectedLane < tracks.Count ? tracks[selectedLane] : null;
+                if (down) { if (tempSolo == null && sel != null) { tempSolo = sel; SetStatus($"Solo (held): {sel.Name}"); InvalidateLanes(); RebuildHeaders(); } }
+                else if (tempSolo != null) { tempSolo = null; SetStatus(""); InvalidateLanes(); RebuildHeaders(); }
+                return true;
             }
             if (!down) return false;
             bool ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control), shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
@@ -563,6 +574,7 @@ namespace WavMarker.Sync
                     return;
                 }
                 int lane = LaneAt(p.Y); if (lane < 0) return;
+                if (selectedLane != lane) { selectedLane = lane; InvalidateLanes(); RebuildHeaders(); }
                 pressed = true; pressLane = lane; pressX = p.X; pressOffset = tracks[lane].Offset; draggingClip = false;
                 LaneHost.CaptureMouse();
             }

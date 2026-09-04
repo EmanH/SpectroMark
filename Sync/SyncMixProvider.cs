@@ -8,6 +8,7 @@ namespace WavMarker.Sync
         readonly List<SyncTrack> tracks;
         readonly long endFrame;
         public long Position;
+        public Func<SyncTrack> TempSolo;   // lane soloed while a key is held, or null
         float[] tmp = new float[0];
 
         public SyncMixProvider(List<SyncTrack> tracks, int sampleRate, long startFrame, long endFrame)
@@ -25,10 +26,11 @@ namespace WavMarker.Sync
             if (avail <= 0) return 0;
             if (frames > avail) frames = (int)avail;
             Array.Clear(buffer, offset, frames * 2);
+            var temp = TempSolo?.Invoke();
             bool anySolo = tracks.Any(t => t.Solo);
             foreach (var t in tracks)
             {
-                if (t.Mute || (anySolo && !t.Solo)) continue;
+                if (temp != null ? t != temp : (t.Mute || (anySolo && !t.Solo))) continue;
                 long local0 = Position - t.Offset;
                 if (local0 + frames <= 0 || local0 >= t.RenderedLength) continue;
                 if (t.Audio.ChannelCount == 1)
