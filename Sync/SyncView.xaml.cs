@@ -501,6 +501,7 @@ namespace WavMarker.Sync
             bool was = playing; if (was) StopPlayback();
             playhead = Math.Clamp(s, 0, Math.Max(0, EndFrame));
             if (was) StartPlayback();
+            if (followPlayhead) { viewStart = playhead - viewLen / 2; ViewChanged(); }   // scroll mode: playhead stays centred, content moves
             RefreshPlayhead(); UpdateTime();
         }
 
