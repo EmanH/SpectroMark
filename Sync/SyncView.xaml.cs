@@ -89,7 +89,7 @@ namespace WavMarker.Sync
             SetStatus(msg);
             SyncHint.Foreground = Brushes.OrangeRed; SyncHint.Text = "⚠ " + msg;
             var tmr = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-            tmr.Tick += (_, _) => { tmr.Stop(); SyncHint.Foreground = new SolidColorBrush(Color.FromRgb(255, 235, 59)); if (sHeld && anchorTrack != null) SyncHint.Text = $"SYNC anchor {anchorTrack.Name} @ {FormatTime((double)anchorTime / sampleRate)}  - {groupCount} lanes in this group"; else if (sHeld) SyncHint.Text = "SYNC: click the anchor marker"; else SyncHint.Text = ""; };
+            tmr.Tick += (_, _) => { tmr.Stop(); SyncHint.Foreground = new SolidColorBrush(Color.FromRgb(255, 235, 59)); if (sHeld && group.Count > 0) ApplyGroup(); else if (sHeld) SyncHint.Text = "SYNC: click the first marker of a group"; else SyncHint.Text = ""; };
             tmr.Start();
         }
 
@@ -478,8 +478,8 @@ namespace WavMarker.Sync
         {
             if (e.Key == Key.LeftCtrl || e.Key == Key.RightCtrl)
             {
-                if (down && !sHeld) { sHeld = true; anchorTrack = null; groupCount = 0; SyncHint.Text = "SYNC: click the anchor marker"; Mouse.OverrideCursor = Cursors.Cross; RefreshOverlay(); }
-                else if (!down) { sHeld = false; anchorTrack = null; SyncHint.Text = ""; Mouse.OverrideCursor = null; RefreshOverlay(); }
+                if (down && !sHeld) { sHeld = true; anchorTrack = null; group.Clear(); groupCount = 0; SyncHint.Text = "SYNC: click the first marker of a group"; Mouse.OverrideCursor = Cursors.Cross; RefreshOverlay(); }
+                else if (!down) { sHeld = false; anchorTrack = null; group.Clear(); SyncHint.Text = ""; Mouse.OverrideCursor = null; RefreshOverlay(); }
                 return false;   // let Ctrl combos (Ctrl+Z, Ctrl+S ...) still work
             }
             if (!down) return false;
@@ -603,47 +603,75 @@ namespace WavMarker.Sync
 
         // ---------------- sync logic ----------------
 
+        // A sync group: every Ctrl-click adds that lane's marker; the group's time is the robust centre of all
+        // members' ORIGINAL positions (before this group changed anything) and every member is re-snapped to it.
+        class GroupMember { public SyncTrack Track; public Marker Marker; public long BaseTime; public long BaseOffset; public bool HadPoints; }
+        readonly List<GroupMember> group = new();
+
         void SyncClick(SyncTrack t, Marker m)
         {
-            if (anchorTrack == null)
+            if (group.Count == 0) PushUndo();                      // one undo step for the whole group
+            var existing = group.FirstOrDefault(g => g.Track == t);
+            if (existing != null && existing.Marker == m) return;
+            if (existing != null)
             {
-                anchorTrack = t; anchorTime = t.SourceToTimeline(m.Sample); groupCount = 1;
-                if (t.PointAt(m.Sample) == null)
+                // different marker on a lane already in the group: swap it (restore the lane's base state first)
+                RestoreMember(existing);
+                group.Remove(existing);
+            }
+            group.Add(new GroupMember { Track = t, Marker = m, BaseTime = t.SourceToTimeline(m.Sample), BaseOffset = t.Offset, HadPoints = t.Points.Count > 0 });
+            ApplyGroup();
+        }
+
+        void RestoreMember(GroupMember g)
+        {
+            var pt = g.Track.PointAt(g.Marker.Sample);
+            if (pt != null) g.Track.RemovePoint(pt);
+            if (!g.HadPoints) { g.Track.Offset = g.BaseOffset; g.Track.Points.Clear(); g.Track.RenderVersion++; }
+        }
+
+        static long RobustCentre(List<long> xs)
+        {
+            if (xs.Count == 1) return xs[0];
+            var sorted = xs.OrderBy(v => v).ToList();
+            double median = sorted.Count % 2 == 1 ? sorted[sorted.Count / 2] : (sorted[sorted.Count / 2 - 1] + sorted[sorted.Count / 2]) / 2.0;
+            var keep = new List<long>(xs);
+            if (xs.Count >= 4)
+            {
+                // drop the single worst outlier if it is far from everyone else
+                var devs = xs.Select(v => Math.Abs(v - median)).OrderBy(v => v).ToList();
+                double typical = devs[devs.Count / 2];
+                var worst = xs.OrderByDescending(v => Math.Abs(v - median)).First();
+                if (Math.Abs(worst - median) > Math.Max(typical * 2.5, 1)) keep.Remove(worst);
+            }
+            return (long)Math.Round(keep.Average());
+        }
+
+        void ApplyGroup()
+        {
+            if (group.Count == 0) return;
+            long centre = RobustCentre(group.Select(g => g.BaseTime).ToList());
+            anchorTime = centre; anchorTrack = group[0].Track;
+            foreach (var g in group)
+            {
+                var t = g.Track;
+                if (!g.HadPoints)
                 {
-                    // the anchor is pinned too: it becomes a fixed sync point on its own lane
-                    PushUndo();
-                    t.AddOrUpdatePoint(m.Sample, t.SourceToLocal(m.Sample));
-                    ScheduleRender(t); RebuildHeaders();
+                    // first sync point on this lane: slide the clip, pin the marker
+                    t.Offset = g.BaseOffset + (centre - g.BaseTime);
+                    t.Points.Clear();
+                    t.AddOrUpdatePoint(g.Marker.Sample, g.Marker.Sample);
                 }
-                SyncHint.Text = $"SYNC anchor: {t.Name} @ {FormatTime((double)anchorTime / sampleRate)}  - click markers on other lanes";
-                RefreshOverlay(); return;
+                else
+                {
+                    t.AddOrUpdatePoint(g.Marker.Sample, centre - t.Offset);
+                }
+                ScheduleRender(t);
             }
-            if (t == anchorTrack)
-            {
-                // clicked another marker on the anchor lane: it becomes the new anchor for this group
-                anchorTime = t.SourceToTimeline(m.Sample);
-                if (t.PointAt(m.Sample) == null) { PushUndo(); t.AddOrUpdatePoint(m.Sample, t.SourceToLocal(m.Sample)); ScheduleRender(t); RebuildHeaders(); }
-                RefreshOverlay();
-                SyncHint.Text = $"SYNC anchor moved: {t.Name} @ {FormatTime((double)anchorTime / sampleRate)}";
-                return;
-            }
-            PushUndo();
-            if (t.Points.Count == 0)
-            {
-                t.Offset = anchorTime - m.Sample;
-                t.AddOrUpdatePoint(m.Sample, m.Sample);
-            }
-            else
-            {
-                long localTarget = anchorTime - t.Offset;
-                t.AddOrUpdatePoint(m.Sample, localTarget);
-                var prev = t.Points.Where(p => p.Source < m.Sample).LastOrDefault();
-                if (prev != null) SetStatus($"{t.Name}: stretched {(double)(localTarget - prev.Target) / Math.Max(1, m.Sample - prev.Source):0.000}x between sync points");
-            }
-            groupCount++;
-            ScheduleRender(t);
-            RefreshOverlay(); RebuildHeaders(); UpdateScrollBar(); UpdateTime();
-            SyncHint.Text = $"SYNC anchor {anchorTrack.Name} @ {FormatTime((double)anchorTime / sampleRate)}  - {groupCount} lanes in this group";
+            groupCount = group.Count;
+            RefreshOverlay(); RebuildHeaders(); UpdateScrollBar(); UpdateTime(); InvalidateNav();
+            var spread = group.Count > 1 ? (group.Max(g => g.BaseTime) - group.Min(g => g.BaseTime)) / (double)sampleRate : 0;
+            SyncHint.Text = $"SYNC: {group.Count} lane(s) centred @ {FormatTime((double)centre / sampleRate)}   spread {spread * 1000:0} ms";
         }
 
         // ---------------- undo / session ----------------
