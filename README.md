@@ -10,9 +10,10 @@ Open a file, press **Space** to play, press **M** to drop a marker. That's it.
 - Scrub with the left mouse button, zoom with the mouse wheel, pan with Shift+wheel or middle-drag
 - Bright flashing marker line when you hit **M**; right-click a marker and drag to move it
 - Marker list with time positions; **Delete** removes the selected marker
-- Markers are saved next to the WAV as `<name>_markers.csv` in Adobe Audition's tab-separated marker format (importable in Audition's Markers panel) and reloaded automatically next time you open the file
+- Markers are read from and written into the WAV file itself (standard RIFF `cue` + `LIST/adtl` chunks), so they show up in Adobe Audition, Reaper, Sound Forge and any other editor, and markers set in those tools show up here
 - Log/linear frequency axis, adjustable dB floor
-- Opens WAV, FLAC, MP3, AIFF; drag-and-drop or pass a file on the command line
+- Open or drag in many files at once; they appear in a resizable file list on the left. Click to switch between them, unsaved files are marked with *, and Save / Save All / Close work per file
+- Opens WAV, FLAC, MP3, AIFF; drag-and-drop files or folders, or pass files on the command line
 
 ## Keys
 | Key | Action |
@@ -23,7 +24,9 @@ Open a file, press **Space** to play, press **M** to drop a marker. That's it.
 | ← / → | Nudge 1 s (Shift: 0.1 s) |
 | + / - | Zoom in / out |
 | Delete | Remove selected marker |
-| Ctrl+S | Save markers |
+| Ctrl+S | Save markers into the WAV |
+
+The published exe is compressed (about 70 MB); it bundles the whole .NET runtime so nothing needs installing.
 
 ## Build
 Requires the .NET 10 SDK.

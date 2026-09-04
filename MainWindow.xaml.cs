@@ -20,6 +20,17 @@ namespace WavMarker
         public string Name = "";
     }
 
+    public class FileEntry : System.ComponentModel.INotifyPropertyChanged
+    {
+        public string Path;
+        public List<Marker> Markers = new();
+        public bool MarkersLoaded;
+        bool dirty;
+        public bool Dirty { get => dirty; set { dirty = value; PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Display))); } }
+        public string Display => (dirty ? "* " : "") + System.IO.Path.GetFileName(Path);
+        public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
+    }
+
     class AudioData
     {
         public float[][] Channels;
@@ -62,8 +73,10 @@ namespace WavMarker
         AudioData audio;
         Spectrogram spec;
         string filePath;
-        readonly List<Marker> markers = new();
+        List<Marker> markers = new();
         Marker selectedMarker;
+        readonly System.Collections.ObjectModel.ObservableCollection<FileEntry> files = new();
+        FileEntry current;
 
         // view (in samples)
         double viewStart, viewLen;
@@ -109,40 +122,111 @@ namespace WavMarker
             {
                 var src = PresentationSource.FromVisual(this);
                 if (src?.CompositionTarget != null) dpiScale = src.CompositionTarget.TransformToDevice.M11;
-                var args = Environment.GetCommandLineArgs();
-                if (args.Length > 1 && File.Exists(args[1])) _ = LoadFile(args[1]);
+                FileList.ItemsSource = files;
+                var args = Environment.GetCommandLineArgs().Skip(1).Where(File.Exists).ToArray();
+                if (args.Length > 0) AddFiles(args);
             };
-            Closing += (_, _) => StopPlayback();
+            Closing += (_, e) =>
+            {
+                StopPlayback();
+                if (files.Any(f => f.Dirty))
+                {
+                    var r = MessageBox.Show("Some files have unsaved markers. Save them all before closing?", "SpectroMark", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+                    if (r == MessageBoxResult.Cancel) { e.Cancel = true; return; }
+                    if (r == MessageBoxResult.Yes) SaveAll_Click(null, null);
+                }
+            };
         }
 
         // ---------------- file loading ----------------
 
         async void Open_Click(object sender, RoutedEventArgs e)
         {
-            var dlg = new Microsoft.Win32.OpenFileDialog { Filter = "Audio files|*.wav;*.flac;*.mp3;*.aif;*.aiff|All files|*.*" };
-            if (dlg.ShowDialog() == true) await LoadFile(dlg.FileName);
+            var dlg = new Microsoft.Win32.OpenFileDialog { Filter = "Audio files|*.wav;*.flac;*.mp3;*.aif;*.aiff|All files|*.*", Multiselect = true };
+            if (dlg.ShowDialog() == true) AddFiles(dlg.FileNames);
+            await Task.CompletedTask;
         }
 
         void Window_Drop(object sender, DragEventArgs e)
         {
-            if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0) _ = LoadFile(files[0]);
+            if (e.Data.GetData(DataFormats.FileDrop) is string[] dropped && dropped.Length > 0)
+                AddFiles(dropped.SelectMany(p => Directory.Exists(p) ? Directory.EnumerateFiles(p, "*.wav") : new[] { p }).ToArray());
         }
 
-        async Task LoadFile(string path)
+        void AddFiles(string[] paths)
         {
+            FileEntry first = null;
+            foreach (var p in paths)
+            {
+                var existing = files.FirstOrDefault(f => string.Equals(f.Path, p, StringComparison.OrdinalIgnoreCase));
+                if (existing == null) { existing = new FileEntry { Path = p }; files.Add(existing); }
+                first ??= existing;
+            }
+            if (first != null && (current == null || paths.Length == 1)) FileList.SelectedItem = first;
+        }
+
+        void FileList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (FileList.SelectedItem is FileEntry fe && fe != current) _ = LoadEntry(fe);
+        }
+
+        void CloseFile_Click(object sender, RoutedEventArgs e)
+        {
+            if (FileList.SelectedItem is not FileEntry fe) return;
+            if (fe.Dirty)
+            {
+                var r = MessageBox.Show($"Save markers into {System.IO.Path.GetFileName(fe.Path)} before closing?", "SpectroMark", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+                if (r == MessageBoxResult.Cancel) return;
+                if (r == MessageBoxResult.Yes) SaveEntry(fe);
+            }
+            int idx = files.IndexOf(fe);
+            files.Remove(fe);
+            if (fe == current)
+            {
+                if (files.Count > 0) FileList.SelectedItem = files[Math.Min(idx, files.Count - 1)];
+                else UnloadCurrent();
+            }
+        }
+
+        void CloseAll_Click(object sender, RoutedEventArgs e)
+        {
+            if (files.Any(f => f.Dirty))
+            {
+                var r = MessageBox.Show("Some files have unsaved markers. Save them all first?", "SpectroMark", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+                if (r == MessageBoxResult.Cancel) return;
+                if (r == MessageBoxResult.Yes) SaveAll_Click(null, null);
+            }
+            files.Clear(); UnloadCurrent();
+        }
+
+        void UnloadCurrent()
+        {
+            StopPlayback();
+            current = null; audio = null; spec = null; filePath = null; markers = new(); selectedMarker = null;
+            Title = "SpectroMark"; InfoText.Text = "Open a WAV file (or drag files in)";
+            InvalidateOverview(); InvalidateSpec(); RefreshOverlays(); RefreshMarkerList(); UpdateTimeText(); Ruler.Children.Clear();
+        }
+
+        void MarkDirty() { if (current != null) current.Dirty = true; }
+
+        async Task LoadEntry(FileEntry entry)
+        {
+            string path = entry.Path;
             StopPlayback();
             InfoText.Text = "Loading " + System.IO.Path.GetFileName(path) + " ...";
             try
             {
                 var data = await Task.Run(() => ReadAudio(path));
+                if (FileList.SelectedItem != entry) return; // user clicked another file meanwhile
+                current = entry;
                 audio = data; filePath = path; playhead = 0; spec = null;
                 viewStart = 0; viewLen = audio.Length;
-                markers.Clear(); selectedMarker = null;
+                markers = entry.Markers; selectedMarker = null;
                 Title = "SpectroMark - " + System.IO.Path.GetFileName(path);
                 string chDesc = audio.ChannelCount switch { 1 => "MONO (1 channel)", 2 => "STEREO (2 channels)", _ => audio.ChannelCount + " channels" };
                 InfoText.Text = $"{System.IO.Path.GetFileName(path)}   |   {chDesc}   |   {audio.SampleRate} Hz   |   {FormatTime(audio.Duration)}   |   analysing spectrogram...";
                 InvalidateOverview(); InvalidateSpec(); UpdateScrollBar(); DrawRuler(); RefreshOverlays(); UpdateTimeText();
-                LoadMarkersFile();
+                if (!entry.MarkersLoaded) { LoadMarkersFile(); entry.MarkersLoaded = true; } else RefreshMarkerList();
                 var s = await Task.Run(() => ComputeSpectrogram(audio));
                 if (audio != data) return;
                 spec = s;
@@ -347,7 +431,9 @@ namespace WavMarker
             if (audio != null)
             {
                 int nch = audio.ChannelCount; int bandH = H / nch;
-                int col = unchecked((int)0xFF3FA9F5), mid = unchecked((int)0xFF2A2A2A);
+                int col = unchecked((int)0xFF66D9FF), mid = unchecked((int)0xFF3A3A3A);
+                float peak = 0; foreach (var chn in audio.Channels) { for (long i = 0; i < chn.Length; i += 7) { float v = Math.Abs(chn[i]); if (v > peak) peak = v; } }
+                float norm = peak > 1e-4f ? 1f / peak : 1f;
                 var px = ovPx;
                 for (int c = 0; c < nch; c++)
                 {
@@ -361,6 +447,7 @@ namespace WavMarker
                         float mn = 0, mx = 0;
                         long step = Math.Max(1, (s1 - s0) / 2000);
                         for (long i = s0; i < s1; i += step) { float v = src[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+                        mx *= norm; mn *= norm;
                         int y0 = center - (int)(mx * (bandH / 2 - 1)), y1 = center - (int)(mn * (bandH / 2 - 1));
                         for (int y = Math.Max(top, y0); y <= Math.Min(top + bandH - 1, y1); y++) px[y * W + x] = col;
                     });
@@ -577,7 +664,7 @@ namespace WavMarker
             var mk = new Marker { Sample = pos };
             markers.Add(mk);
             markers.Sort((a, b) => a.Sample.CompareTo(b.Sample));
-            selectedMarker = mk;
+            selectedMarker = mk; MarkDirty();
             RefreshMarkerList(); RefreshOverlays();
             FlashMarker(mk);
         }
@@ -597,6 +684,7 @@ namespace WavMarker
         {
             MarkerList.SelectionChanged -= MarkerList_SelectionChanged;
             MarkerList.Items.Clear();
+            if (audio == null) { MarkerList.SelectionChanged += MarkerList_SelectionChanged; return; }
             int i = 1;
             foreach (var mk in markers)
                 MarkerList.Items.Add($"{i++,2}  {FormatTime((double)mk.Sample / audio.SampleRate)}{(string.IsNullOrEmpty(mk.Name) ? "" : "  " + mk.Name)}");
@@ -622,7 +710,7 @@ namespace WavMarker
         void DeleteSelected()
         {
             if (selectedMarker == null) return;
-            markers.Remove(selectedMarker); selectedMarker = null;
+            markers.Remove(selectedMarker); selectedMarker = null; MarkDirty();
             RefreshMarkerList(); RefreshOverlays();
         }
 
@@ -630,58 +718,47 @@ namespace WavMarker
         {
             if (markers.Count == 0) return;
             if (MessageBox.Show("Remove all markers?", "SpectroMark", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-            markers.Clear(); selectedMarker = null; RefreshMarkerList(); RefreshOverlays();
+            markers.Clear(); selectedMarker = null; MarkDirty(); RefreshMarkerList(); RefreshOverlays();
         }
 
-        string MarkersPath => filePath == null ? null : System.IO.Path.Combine(System.IO.Path.GetDirectoryName(filePath), System.IO.Path.GetFileNameWithoutExtension(filePath) + "_markers.csv");
-
-        // Adobe Audition-compatible tab-separated marker file
+        // Markers live inside the WAV itself (RIFF 'cue ' + 'LIST/adtl' chunks), like Audition and other editors.
         void SaveMarkers_Click(object sender, RoutedEventArgs e)
         {
-            if (audio == null) return;
-            var sb = new System.Text.StringBuilder();
-            sb.AppendLine("Name\tStart\tDuration\tTime Format\tType\tDescription");
-            int i = 1;
-            foreach (var mk in markers)
+            if (current == null) return;
+            bool wasPlaying = playing; if (wasPlaying) StopPlayback();
+            if (SaveEntry(current)) InfoText.Text = $"Saved {markers.Count} markers into {System.IO.Path.GetFileName(current.Path)}";
+            if (wasPlaying) StartPlayback();
+        }
+
+        void SaveAll_Click(object sender, RoutedEventArgs e)
+        {
+            bool wasPlaying = playing; if (wasPlaying) StopPlayback();
+            int n = 0;
+            foreach (var f in files.Where(f => f.Dirty).ToList()) if (SaveEntry(f)) n++;
+            InfoText.Text = $"Saved markers into {n} file(s)";
+            if (wasPlaying) StartPlayback();
+        }
+
+        bool SaveEntry(FileEntry fe)
+        {
+            try
             {
-                string name = string.IsNullOrEmpty(mk.Name) ? $"Marker {i:00}" : mk.Name;
-                sb.AppendLine($"{name}\t{FormatTime((double)mk.Sample / audio.SampleRate)}\t0:00.000\tdecimal\tCue\t{mk.Sample}");
-                i++;
+                WavCues.Write(fe.Path, fe.Markers);
+                fe.Dirty = false;
+                return true;
             }
-            File.WriteAllText(MarkersPath, sb.ToString());
-            InfoText.Text = $"Saved {markers.Count} markers to {System.IO.Path.GetFileName(MarkersPath)}";
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Could not write markers into {System.IO.Path.GetFileName(fe.Path)}:\n{ex.Message}", "SpectroMark", MessageBoxButton.OK, MessageBoxImage.Error);
+                return false;
+            }
         }
 
         void LoadMarkersFile()
         {
             markers.Clear();
-            var p = MarkersPath;
-            if (p == null || !File.Exists(p)) { RefreshMarkerList(); return; }
-            foreach (var line in File.ReadAllLines(p).Skip(1))
-            {
-                var parts = line.Split('\t');
-                if (parts.Length < 2) continue;
-                long smp;
-                if (parts.Length >= 6 && long.TryParse(parts[5], out var exact)) smp = exact;
-                else if (TryParseTime(parts[1], out var secs)) smp = (long)(secs * audio.SampleRate);
-                else continue;
-                markers.Add(new Marker { Sample = smp, Name = parts[0].StartsWith("Marker ") ? "" : parts[0] });
-            }
-            markers.Sort((a, b) => a.Sample.CompareTo(b.Sample));
+            try { if (filePath != null) markers.AddRange(WavCues.Read(filePath)); } catch { }
             RefreshMarkerList();
-        }
-
-        static bool TryParseTime(string s, out double secs)
-        {
-            secs = 0;
-            var parts = s.Split(':');
-            try
-            {
-                double mult = 1;
-                for (int i = parts.Length - 1; i >= 0; i--) { secs += double.Parse(parts[i], CultureInfo.InvariantCulture) * mult; mult *= 60; }
-                return true;
-            }
-            catch { return false; }
         }
 
         Marker MarkerNear(double x, double tolerance = 8)
@@ -804,7 +881,7 @@ namespace WavMarker
         {
             if (draggingMarker && e.ChangedButton == MouseButton.Right)
             {
-                draggingMarker = false; SpecHost.ReleaseMouseCapture();
+                draggingMarker = false; SpecHost.ReleaseMouseCapture(); MarkDirty();
                 markers.Sort((a, b) => a.Sample.CompareTo(b.Sample)); RefreshMarkerList(); RefreshOverlays();
             }
             else if (panning && e.ChangedButton == MouseButton.Middle) { panning = false; SpecHost.ReleaseMouseCapture(); }

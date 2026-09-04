@@ -24,10 +24,11 @@
             <DockPanel>
                 <TextBlock x:Name="TimeText" DockPanel.Dock="Right" FontFamily="Consolas" FontSize="26" Foreground="#FFEB3B" Text="0:00.000 / 0:00.000" Margin="16,0,0,0"/>
                 <StackPanel Orientation="Horizontal">
-                    <Button Content="Open WAV..." Click="Open_Click"/>
+                    <Button Content="Open WAV(s)..." Click="Open_Click"/>
                     <Button x:Name="PlayBtn" Content="Play  (Space)" Click="Play_Click" Width="120"/>
                     <Button Content="Drop Marker  (M)" Click="Marker_Click" Background="#3a3a10" Foreground="#FFEB3B"/>
-                    <Button Content="Save Markers" Click="SaveMarkers_Click"/>
+                    <Button Content="Save" Click="SaveMarkers_Click"/>
+                    <Button Content="Save All" Click="SaveAll_Click"/>
                     <CheckBox x:Name="LogFreqChk" Content="Log frequency" Foreground="#ccc" VerticalAlignment="Center" Margin="10,0" Checked="Spec_SettingChanged" Unchecked="Spec_SettingChanged"/>
                     <TextBlock Text="Floor dB" Margin="8,0,4,0"/>
                     <Slider x:Name="FloorSlider" Minimum="-130" Maximum="-40" Value="-100" Width="120" VerticalAlignment="Center" ValueChanged="Spec_SettingChanged"/>
@@ -38,14 +39,27 @@
         <!-- Status / hints -->
         <Border DockPanel.Dock="Bottom" Background="#1e1e1e" Padding="10,3" BorderBrush="#333" BorderThickness="0,1,0,0">
             <TextBlock FontSize="11" Foreground="#888"
-                       Text="Space: play/pause   M: drop marker   Home: to start   ←/→: nudge 1s   Delete: remove selected marker   |   Left-click/drag: scrub   Wheel: zoom   Shift+Wheel: pan   Middle-drag: pan   |   Right-click a marker and drag to move it"/>
+                       Text="Ctrl+S: save markers into WAV   Space: play/pause   M: drop marker   Home: to start   ←/→: nudge 1s   Delete: remove selected marker   |   Left-click/drag: scrub   Wheel: zoom   Shift+Wheel: pan   Middle-drag: pan   |   Right-click a marker and drag to move it"/>
         </Border>
         <Grid>
             <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="230" MinWidth="120"/>
+                <ColumnDefinition Width="5"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="210"/>
             </Grid.ColumnDefinitions>
-            <Grid Grid.Column="0" x:Name="ViewGrid">
+            <!-- File list -->
+            <DockPanel Grid.Column="0" Background="#1a1a1a">
+                <TextBlock DockPanel.Dock="Top" Text="Files" FontWeight="Bold" Margin="8,6" Foreground="#7FD7FF"/>
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="8,6">
+                    <Button Content="Close" Click="CloseFile_Click" ToolTip="Remove the selected file from the list"/>
+                    <Button Content="Close All" Click="CloseAll_Click"/>
+                </StackPanel>
+                <ListBox x:Name="FileList" Background="#111" Foreground="#eee" BorderThickness="0" FontSize="13"
+                         SelectionChanged="FileList_SelectionChanged" DisplayMemberPath="Display" ToolTipService.ShowDuration="20000"/>
+            </DockPanel>
+            <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="#2a2a2a" Focusable="False"/>
+            <Grid Grid.Column="2" x:Name="ViewGrid">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="100"/>
                     <RowDefinition Height="20"/>
@@ -70,7 +84,7 @@
                 <ScrollBar Grid.Row="3" x:Name="HScroll" Orientation="Horizontal" Scroll="HScroll_Scroll"/>
             </Grid>
             <!-- Marker list -->
-            <DockPanel Grid.Column="1" Background="#1a1a1a">
+            <DockPanel Grid.Column="3" Background="#1a1a1a">
                 <TextBlock DockPanel.Dock="Top" Text="Markers" FontWeight="Bold" Margin="8,6" Foreground="#FFEB3B"/>
                 <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="8,6">
                     <Button Content="Delete" Click="DeleteMarker_Click"/>
