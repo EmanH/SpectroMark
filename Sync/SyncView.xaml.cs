@@ -186,7 +186,7 @@ namespace WavMarker.Sync
                 rm.Click += (_, _) => RemoveTrack(t);
                 row.Children.Add(mute); row.Children.Add(solo); row.Children.Add(rm);
                 panel.Children.Add(row);
-                panel.Children.Add(new TextBlock { Text = (tempSolo == t ? "SOLO (S)  " : "") + (t.Rendering ? "rendering...  " : "") + $"{t.Points.Count} sync pt", Foreground = tempSolo == t ? Brushes.LightGreen : Brushes.Gray, FontSize = 10, Margin = new Thickness(0, 3, 0, 0) });
+                panel.Children.Add(new TextBlock { Text = (tempSolo == t ? "SOLO  " : "") + (t.Rendering ? "rendering...  " : "") + $"{t.Points.Count} sync pt", Foreground = tempSolo == t ? Brushes.LightGreen : Brushes.Gray, FontSize = 10, Margin = new Thickness(0, 3, 0, 0) });
                 bool selectedHdr = i == selectedLane;
                 Headers.Children.Add(new Border { Height = h, Child = panel, BorderBrush = selectedHdr ? new SolidColorBrush(Color.FromRgb(79, 179, 232)) : new SolidColorBrush(Color.FromRgb(40, 40, 40)), BorderThickness = selectedHdr ? new Thickness(3, 0, 0, 1) : new Thickness(0, 0, 0, 1), Background = new SolidColorBrush(selectedHdr ? Color.FromRgb(34, 38, 46) : i % 2 == 0 ? Color.FromRgb(26, 26, 26) : Color.FromRgb(22, 22, 22)) });
             }
@@ -578,13 +578,13 @@ namespace WavMarker.Sync
                 else if (!down) { sHeld = false; anchorTrack = null; group.Clear(); SyncHint.Text = ""; Mouse.OverrideCursor = null; RefreshOverlay(); }
                 return false;   // let Ctrl combos (Ctrl+Z, Ctrl+S ...) still work
             }
-            if ((e.Key == Key.S && Keyboard.Modifiers == ModifierKeys.None) || e.Key == Key.LeftShift || e.Key == Key.RightShift)
+            if (e.Key == Key.LeftShift || e.Key == Key.RightShift)
             {
-                if (e.Key != Key.S && Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) return false;   // Ctrl+Shift combos untouched
+                if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) return false;   // Ctrl+Shift combos untouched
                 var sel = selectedLane >= 0 && selectedLane < tracks.Count ? tracks[selectedLane] : null;
                 if (down) { if (tempSolo == null && sel != null) { tempSolo = sel; SetStatus($"Solo (held): {sel.Name}"); InvalidateLanes(); RebuildHeaders(); } }
                 else if (tempSolo != null) { tempSolo = null; SetStatus(""); InvalidateLanes(); RebuildHeaders(); }
-                return e.Key == Key.S;   // Shift itself must stay unhandled so Shift+wheel and Shift+arrows still work
+                return false;   // Shift stays unhandled so Shift+wheel and Shift+arrows still work
             }
             if (!down) return false;
             bool ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control), shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
