@@ -96,6 +96,7 @@ namespace WavMarker
 
         // mouse state
         bool scrubbing, panning, draggingMarker, ovDragging;
+        bool markerPressed; double markerPressX; bool markerMoved;
         double panLastX, ovDragOffset;
         bool wasPlayingBeforeScrub;
 
@@ -720,12 +721,11 @@ namespace WavMarker
                 var ev = await Task.Run(() => AutoMark.Detect(data));
                 if (current != entry) return;
                 PushUndo();
+                markers.Clear(); selectedMarker = null;
                 int added = 0;
                 foreach (var ev1 in ev)
                 {
-                    long smp = (long)(ev1.Time * data.SampleRate);
-                    if (markers.Any(m => Math.Abs(m.Sample - smp) < data.SampleRate * 0.08)) continue;
-                    markers.Add(new Marker { Sample = smp }); added++;
+                    markers.Add(new Marker { Sample = (long)(ev1.Time * data.SampleRate) }); added++;
                 }
                 markers.Sort((a, b) => a.Sample.CompareTo(b.Sample));
                 MarkDirty(); RefreshMarkerList(); RefreshOverlays();
@@ -912,8 +912,7 @@ namespace WavMarker
                 var mk = MarkerNear(p.X);
                 if (mk != null)
                 {
-                    PushUndo();
-                    selectedMarker = mk; draggingMarker = true; SpecHost.CaptureMouse();
+                    selectedMarker = mk; markerPressed = true; markerMoved = false; markerPressX = p.X; SpecHost.CaptureMouse();
                     RefreshMarkerList(); RefreshOverlays();
                 }
                 e.Handled = true;
@@ -927,8 +926,7 @@ namespace WavMarker
                 var mk = MarkerNear(p.X);
                 if (mk != null)
                 {
-                    PushUndo();
-                    selectedMarker = mk; draggingMarker = true; SpecHost.CaptureMouse();
+                    selectedMarker = mk; markerPressed = true; markerMoved = false; markerPressX = p.X; SpecHost.CaptureMouse();
                     RefreshMarkerList(); RefreshOverlays();
                     return;
                 }
@@ -944,6 +942,10 @@ namespace WavMarker
         {
             if (audio == null) return;
             var p = e.GetPosition(SpecHost);
+            if (markerPressed && !draggingMarker && selectedMarker != null && Math.Abs(p.X - markerPressX) >= 4)
+            {
+                PushUndo(); draggingMarker = true; markerMoved = true;   // a real drag starts only after the mouse moves
+            }
             if (draggingMarker && selectedMarker != null)
             {
                 selectedMarker.Sample = (long)Math.Clamp(XToSample(p.X), 0, audio.Length);
@@ -970,10 +972,14 @@ namespace WavMarker
 
         void Spec_MouseUp(object sender, MouseButtonEventArgs e)
         {
-            if (draggingMarker && (e.ChangedButton == MouseButton.Left || e.ChangedButton == MouseButton.Right))
+            if (markerPressed && (e.ChangedButton == MouseButton.Left || e.ChangedButton == MouseButton.Right))
             {
-                draggingMarker = false; SpecHost.ReleaseMouseCapture(); MarkDirty();
-                markers.Sort((a, b) => a.Sample.CompareTo(b.Sample)); RefreshMarkerList(); RefreshOverlays();
+                markerPressed = false; SpecHost.ReleaseMouseCapture();
+                if (draggingMarker)
+                {
+                    draggingMarker = false; MarkDirty();
+                    markers.Sort((a, b) => a.Sample.CompareTo(b.Sample)); RefreshMarkerList(); RefreshOverlays();
+                }
             }
             else if (panning && e.ChangedButton == MouseButton.Middle) { panning = false; SpecHost.ReleaseMouseCapture(); }
             else if (scrubbing && e.ChangedButton == MouseButton.Left)

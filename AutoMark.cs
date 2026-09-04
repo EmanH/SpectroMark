@@ -125,7 +125,7 @@ namespace WavMarker
             // ---------- 2. consonant detector ----------
             // fricative/plosive when HF band is loud and close to (or above) the voiced band
             var cons = new double[frames];
-            double consThresh = hfFloor + (hfPeak - hfFloor) * (0.42 / s.ConsonantSensitivity);
+            double consThresh = hfFloor + (hfPeak - hfFloor) * (0.47 / s.ConsonantSensitivity);
             for (int t = 0; t < frames; t++)
             {
                 bool hfLoud = ehf[t] > consThresh;
@@ -147,7 +147,11 @@ namespace WavMarker
                         u++;
                     }
                     int len = end - start + 1;
-                    if (len >= minLen)
+                    // breath rejection: a real consonant runs straight into voiced sound; a breath is followed by a gap
+                    int vLo = Math.Max(0, end - (int)Math.Round(0.02 / frameSec)), vHi = Math.Min(frames - 1, end + (int)Math.Round(0.09 / frameSec));
+                    bool voicedFollows = false;
+                    for (int k = vLo; k <= vHi && !voicedFollows; k++) voicedFollows = voicedGate[k];
+                    if (len >= minLen && voicedFollows)
                     {
                         // centre = energy-weighted centroid of the burst
                         double w = 0, ws = 0, peak = 0;
