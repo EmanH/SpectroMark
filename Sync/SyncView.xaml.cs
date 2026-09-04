@@ -819,7 +819,7 @@ namespace WavMarker.Sync
             await AddFiles(st.Tracks.Select(t => t.Path).Where(File.Exists).ToArray());
             ApplyState(st); loadingSession = false;
             // window/view restore has to wait until layout has settled
-            Dispatcher.BeginInvoke(() => ApplyView(st), DispatcherPriority.Loaded);
+            _ = Dispatcher.BeginInvoke(() => ApplyView(st), DispatcherPriority.Loaded);
             sessionPath = path; undo.Clear(); redo.Clear();
             SetDirty(false);
             SetStatus("Session loaded: " + System.IO.Path.GetFileName(path));
