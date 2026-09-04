@@ -1,4 +1,8 @@
+<p align="center"><img src="assets/logo.png" width="160" alt="SpectroMark logo"></p>
+
 # SpectroMark
+
+**[Download the latest release](https://github.com/EmanH/SpectroMark/releases/latest)** (Windows x64, no install)
 
 A tiny Windows tool for dropping markers on WAV files while watching a full Adobe-Audition-style spectrogram.
 

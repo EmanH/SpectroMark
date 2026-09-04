@@ -540,16 +540,45 @@ namespace WavMarker
             {
                 int nch = audio.ChannelCount; double bandH = H / nch;
                 bool logF = LogFreqChk.IsChecked == true; double nyq = audio.SampleRate / 2.0;
-                double[] freqs = logF ? new double[] { 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000 } : new double[] { 1000, 2000, 4000, 6000, 8000, 10000, 12000, 15000, 20000 };
+                // Audition-style axis: labels at 1..7 x each decade (plus 15k / 20k), decades bold,
+                // minor ticks at every step, labels thinned when they would collide.
+                var cand = new List<(double f, bool major)>();
+                if (logF)
+                {
+                    for (double dec = 10; dec < nyq; dec *= 10)
+                    {
+                        cand.Add((dec, true));
+                        foreach (int k in new[] { 2, 3, 4, 5, 6, 7 }) if (dec * k < nyq) cand.Add((dec * k, false));
+                        if (dec == 1000 && 15000 < nyq) cand.Add((15000, false));
+                    }
+                }
+                else
+                {
+                    double stepHz = bandH > 500 ? 1000 : bandH > 250 ? 2000 : 5000;
+                    for (double f = stepHz; f < nyq; f += stepHz) cand.Add((f, f % 10000 == 0));
+                }
+                cand.Sort((a, b) => b.f.CompareTo(a.f));
+                double Frac(double f) => logF ? Math.Log(f / 20.0) / Math.Log(nyq / 20.0) : f / nyq;
                 for (int c = 0; c < nch; c++)
                 {
-                    foreach (var f in freqs)
+                    double lastLabelY = double.NegativeInfinity;
+                    foreach (var (f, major) in cand)
                     {
-                        if (f >= nyq) continue;
-                        double frac = logF ? Math.Log(f / 20.0) / Math.Log(nyq / 20.0) : f / nyq;
+                        double frac = Frac(f);
+                        if (frac <= 0 || frac >= 1) continue;
                         double y = c * bandH + (1 - frac) * bandH;
-                        var tb = new TextBlock { Text = f >= 1000 ? (f / 1000.0).ToString("0.#") + "k" : f.ToString(), Foreground = new SolidColorBrush(Color.FromArgb(150, 255, 255, 255)), FontSize = 10 };
-                        Canvas.SetLeft(tb, 3); Canvas.SetTop(tb, y - 7); SpecOverlay.Children.Add(tb);
+                        SpecOverlay.Children.Add(new Line { X1 = 0, X2 = major ? 8 : 4, Y1 = y, Y2 = y, Stroke = new SolidColorBrush(Color.FromArgb(170, 255, 255, 255)), StrokeThickness = 1 });
+                        if (!major && y - lastLabelY < 13) continue;
+                        if (major && y - lastLabelY < 13 && lastLabelY > double.NegativeInfinity) continue;
+                        lastLabelY = y;
+                        string text = f >= 1000 ? (f / 1000.0).ToString("0.#") + "k" : f.ToString();
+                        var tb = new TextBlock
+                        {
+                            Text = text, FontSize = major ? 11 : 10,
+                            FontWeight = major ? FontWeights.Bold : FontWeights.Normal,
+                            Foreground = new SolidColorBrush(major ? Color.FromArgb(230, 255, 255, 255) : Color.FromArgb(150, 255, 255, 255))
+                        };
+                        Canvas.SetLeft(tb, 10); Canvas.SetTop(tb, y - 8); SpecOverlay.Children.Add(tb);
                     }
                     var lbl = new TextBlock { Text = nch == 1 ? "MONO" : (c == 0 ? "L" : c == 1 ? "R" : "Ch " + (c + 1)), Foreground = Brushes.White, FontWeight = FontWeights.Bold, FontSize = 12, Background = new SolidColorBrush(Color.FromArgb(120, 0, 0, 0)), Padding = new Thickness(3, 0, 3, 0) };
                     Canvas.SetRight(lbl, 4); Canvas.SetTop(lbl, c * bandH + 4); SpecOverlay.Children.Add(lbl);
