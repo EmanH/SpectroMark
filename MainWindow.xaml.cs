@@ -921,8 +921,14 @@ namespace WavMarker
             }
             else if (e.ChangedButton == MouseButton.Left)
             {
-                var mk = MarkerNear(p.X, 5);
-                if (mk != null) { selectedMarker = mk; RefreshMarkerList(); RefreshOverlays(); }
+                var mk = MarkerNear(p.X);
+                if (mk != null)
+                {
+                    PushUndo();
+                    selectedMarker = mk; draggingMarker = true; SpecHost.CaptureMouse();
+                    RefreshMarkerList(); RefreshOverlays();
+                    return;
+                }
                 scrubbing = true; wasPlayingBeforeScrub = playing;
                 if (playing) StopPlayback();
                 playhead = (long)Math.Clamp(XToSample(p.X), 0, audio.Length);
@@ -961,7 +967,7 @@ namespace WavMarker
 
         void Spec_MouseUp(object sender, MouseButtonEventArgs e)
         {
-            if (draggingMarker && e.ChangedButton == MouseButton.Right)
+            if (draggingMarker && (e.ChangedButton == MouseButton.Left || e.ChangedButton == MouseButton.Right))
             {
                 draggingMarker = false; SpecHost.ReleaseMouseCapture(); MarkDirty();
                 markers.Sort((a, b) => a.Sample.CompareTo(b.Sample)); RefreshMarkerList(); RefreshOverlays();

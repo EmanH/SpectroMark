@@ -12,7 +12,7 @@ Open a file, press **Space** to play, press **M** to drop a marker. That's it.
 - Detailed heat-map spectrogram (2048-point FFT), one band per channel, so you can see at a glance whether a file is mono or stereo
 - Overview waveform across the top with a draggable view window
 - Scrub with the left mouse button, zoom with the mouse wheel, pan with Shift+wheel or middle-drag
-- Bright flashing marker line when you hit **M**; right-click a marker and drag to move it
+- Bright flashing marker line when you hit **M**; click and drag a marker to move it
 - Marker list with time positions; **Delete** removes the selected marker
 - Markers are read from and written into the WAV file itself (standard RIFF `cue` + `LIST/adtl` chunks), so they show up in Adobe Audition, Reaper, Sound Forge and any other editor, and markers set in those tools show up here
 - Log/linear frequency axis, adjustable dB floor
