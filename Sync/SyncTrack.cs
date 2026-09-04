@@ -119,11 +119,24 @@ namespace WavMarker.Sync
                 if (p.Source < source && p.Target >= localTarget) return "would fold time backwards over an earlier sync point";
                 if (p.Source > source && p.Target <= localTarget) return "would fold time backwards over a later sync point";
             }
-            const double ratioLimit = 1.35;   // real take drift is a few percent; beyond this it is a wrong click and would sound like stutter
+            // Reject only when it is clearly a wrong click: a big ratio AND a big absolute shift.
+            // Short gaps between nearby markers legitimately produce large ratios from tiny shifts.
+            const double ratioLimit = 1.35;
+            double maxShift = Audio.SampleRate * 0.25;
             var prev = Points.Where(p => p.Source < source).OrderBy(p => p.Source).LastOrDefault();
             var next = Points.Where(p => p.Source > source).OrderBy(p => p.Source).FirstOrDefault();
-            if (prev != null) { double r = (double)(localTarget - prev.Target) / Math.Max(1, source - prev.Source); if (r > ratioLimit || r < 1 / ratioLimit) return $"stretch ratio {r:0.00}x is too extreme (limit {ratioLimit:0.00}x): probably not the same syllable"; }
-            if (next != null) { double r = (double)(next.Target - localTarget) / Math.Max(1, next.Source - source); if (r > ratioLimit || r < 1 / ratioLimit) return $"stretch ratio {r:0.00}x is too extreme (limit {ratioLimit:0.00}x): probably not the same syllable"; }
+            if (prev != null)
+            {
+                double r = (double)(localTarget - prev.Target) / Math.Max(1, source - prev.Source);
+                double shift = Math.Abs((localTarget - prev.Target) - (source - prev.Source));
+                if ((r > ratioLimit || r < 1 / ratioLimit) && shift > maxShift) return $"{r:0.00}x stretch over {shift / Audio.SampleRate:0.00} s to the previous sync point: probably not the same syllable";
+            }
+            if (next != null)
+            {
+                double r = (double)(next.Target - localTarget) / Math.Max(1, next.Source - source);
+                double shift = Math.Abs((next.Target - localTarget) - (next.Source - source));
+                if ((r > ratioLimit || r < 1 / ratioLimit) && shift > maxShift) return $"{r:0.00}x stretch over {shift / Audio.SampleRate:0.00} s to the next sync point: probably not the same syllable";
+            }
             return null;
         }
 

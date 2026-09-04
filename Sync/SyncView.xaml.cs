@@ -79,6 +79,15 @@ namespace WavMarker.Sync
 
         void SetStatus(string s) { Status.Text = s; StatusChanged?.Invoke(s); }
 
+        void Warn(string msg)
+        {
+            SetStatus(msg);
+            SyncHint.Foreground = Brushes.OrangeRed; SyncHint.Text = "⚠ " + msg;
+            var tmr = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            tmr.Tick += (_, _) => { tmr.Stop(); SyncHint.Foreground = new SolidColorBrush(Color.FromRgb(255, 235, 59)); if (sHeld && anchorTrack != null) SyncHint.Text = $"SYNC anchor {anchorTrack.Name} @ {FormatTime((double)anchorTime / sampleRate)}  - {groupCount} lanes in this group"; else if (sHeld) SyncHint.Text = "SYNC: click the anchor marker"; else SyncHint.Text = ""; };
+            tmr.Start();
+        }
+
         // ---------------- clips ----------------
 
         async void AddClips_Click(object sender, RoutedEventArgs e)
@@ -603,7 +612,7 @@ namespace WavMarker.Sync
                 SyncHint.Text = $"SYNC anchor: {t.Name} @ {FormatTime((double)anchorTime / sampleRate)}  - click markers on other lanes";
                 RefreshOverlay(); return;
             }
-            if (t == anchorTrack) { SetStatus("That lane is the anchor; click a marker on another lane."); return; }
+            if (t == anchorTrack) { Warn("That lane is the anchor. Click a marker on another lane, or release S and start a new group."); return; }
             PushUndo();
             if (t.Points.Count == 0)
             {
@@ -614,7 +623,7 @@ namespace WavMarker.Sync
             {
                 long localTarget = anchorTime - t.Offset;
                 string err = t.CheckPoint(m.Sample, localTarget);
-                if (err != null) { undo.Pop(); SetStatus($"Cannot sync: {err}"); return; }
+                if (err != null) { undo.Pop(); Warn("Not synced: " + err); return; }
                 t.AddOrUpdatePoint(m.Sample, localTarget);
                 var prev = t.Points.Where(p => p.Source < m.Sample).LastOrDefault();
                 if (prev != null) SetStatus($"{t.Name}: stretched {(double)(localTarget - prev.Target) / Math.Max(1, m.Sample - prev.Source):0.000}x between sync points");
