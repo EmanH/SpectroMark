@@ -331,10 +331,24 @@ namespace WavMarker.Sync
         void RefreshOverlay() => Overlay.InvalidateVisual();
         void RefreshPlayhead() { PlayheadLayer.InvalidateVisual(); NavOverlay.InvalidateVisual(); }
 
+        /// <summary>Marker prominence by zoom: nearly invisible when the whole song is on screen, clear when zoomed in.</summary>
+        double MarkerAlpha()
+        {
+            double secs = viewLen / sampleRate;
+            // 8 s visible -> 0.85, 240 s visible -> 0.08, log-interpolated
+            double t = Math.Clamp((Math.Log(secs) - Math.Log(8)) / (Math.Log(240) - Math.Log(8)), 0, 1);
+            return 0.85 - t * 0.77;
+        }
+
         void DrawOverlay(DrawingContext dc)
         {
             if (tracks.Count == 0 || viewLen <= 0) return;
             double h = LaneH, W = LaneW;
+            double alpha = MarkerAlpha();
+            var markerBrush = new SolidColorBrush(Color.FromArgb((byte)(alpha * 255), 232, 205, 80)); markerBrush.Freeze();
+            var markerPen = new Pen(markerBrush, 1); markerPen.Freeze();
+            var syncedBrush = new SolidColorBrush(Color.FromArgb((byte)(Math.Max(0.35, alpha) * 255), 90, 255, 255)); syncedBrush.Freeze();
+            var syncedPen = new Pen(syncedBrush, 2); syncedPen.Freeze();
             for (int i = 0; i < tracks.Count; i++)
             {
                 var t = tracks[i]; double top = LaneTop(i);
@@ -346,7 +360,7 @@ namespace WavMarker.Sync
                     bool synced = t.PointAt(m.Sample) != null;
                     bool hot = hover.t == t && hover.m == m;
                     if (sHeld || hot) dc.DrawRectangle(hot ? BandHotRed : BandBrush, null, new Rect(x - HitPx, top, HitPx * 2, h));
-                    dc.DrawLine(hot ? HotPen : synced ? SyncedPen : MarkerPen, new Point(x, top), new Point(x, top + h));
+                    dc.DrawLine(hot ? HotPen : synced ? syncedPen : markerPen, new Point(x, top), new Point(x, top + h));
                     var g = new StreamGeometry();
                     using (var ctx = g.Open())
                     {
@@ -354,7 +368,7 @@ namespace WavMarker.Sync
                         else { ctx.BeginFigure(new Point(x, top), true, true); ctx.LineTo(new Point(x + 9, top), false, false); ctx.LineTo(new Point(x + 9, top + 7), false, false); ctx.LineTo(new Point(x, top + 11), false, false); }
                     }
                     g.Freeze();
-                    dc.DrawGeometry(hot ? HotBrush : synced ? SyncedBrush : MarkerBrush, null, g);
+                    if (alpha > 0.25 || synced || hot) dc.DrawGeometry(hot ? HotBrush : synced ? syncedBrush : markerBrush, null, g);
                 }
             }
             if (anchorTrack != null)
@@ -364,11 +378,20 @@ namespace WavMarker.Sync
             }
         }
 
+        static readonly Pen PlayheadGlow = Freeze(new Pen(new SolidColorBrush(Color.FromArgb(70, 255, 255, 255)), 7));
+        static readonly Pen PlayheadCore = Freeze(new Pen(Brushes.White, 2));
+
         void DrawPlayhead(DrawingContext dc)
         {
             if (tracks.Count == 0 || viewLen <= 0) return;
-            double x = SampleToX(playhead);
-            if (x >= 0 && x <= LaneW) dc.DrawLine(PlayheadPen, new Point(x, 0), new Point(x, LaneHost.ActualHeight));
+            double x = SampleToX(playhead), H = LaneHost.ActualHeight;
+            if (x < 0 || x > LaneW) return;
+            dc.DrawLine(PlayheadGlow, new Point(x, 0), new Point(x, H));
+            dc.DrawLine(PlayheadCore, new Point(x, 0), new Point(x, H));
+            var g = new StreamGeometry();
+            using (var c = g.Open()) { c.BeginFigure(new Point(x - 7, 0), true, true); c.LineTo(new Point(x + 7, 0), false, false); c.LineTo(new Point(x, 9), false, false); }
+            g.Freeze();
+            dc.DrawGeometry(Brushes.White, null, g);
         }
 
         void DrawRuler()
