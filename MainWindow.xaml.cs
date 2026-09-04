@@ -25,6 +25,8 @@ namespace WavMarker
         public string Path;
         public List<Marker> Markers = new();
         public bool MarkersLoaded;
+        public Stack<List<Marker>> Undo = new();
+        public readonly Stack<List<Marker>> Redo = new();
         bool dirty;
         public bool Dirty { get => dirty; set { dirty = value; PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Display))); } }
         public string Display => (dirty ? "* " : "") + System.IO.Path.GetFileName(Path);
@@ -203,11 +205,55 @@ namespace WavMarker
         {
             StopPlayback();
             current = null; audio = null; spec = null; filePath = null; markers = new(); selectedMarker = null;
-            Title = "SpectroMark"; InfoText.Text = "Open a WAV file (or drag files in)";
+            InfoText.Text = "Open a WAV file (or drag files in)"; UpdateDirtyIndicator();
             InvalidateOverview(); InvalidateSpec(); RefreshOverlays(); RefreshMarkerList(); UpdateTimeText(); Ruler.Children.Clear();
         }
 
-        void MarkDirty() { if (current != null) current.Dirty = true; }
+        void MarkDirty() { if (current != null) current.Dirty = true; UpdateDirtyIndicator(); }
+
+        void UpdateDirtyIndicator()
+        {
+            bool cur = current?.Dirty == true;
+            int others = files.Count(f => f.Dirty && f != current);
+            DirtyText.Text = cur ? "* unsaved" + (others > 0 ? $" (+{others})" : "") : (others > 0 ? $"({others} unsaved)" : "");
+            Title = "SpectroMark" + (current != null ? " - " + (cur ? "* " : "") + System.IO.Path.GetFileName(current.Path) : "");
+        }
+
+        // ---------------- undo / redo ----------------
+
+        static List<Marker> Snapshot(List<Marker> src) => src.Select(m => new Marker { Sample = m.Sample, Name = m.Name }).ToList();
+
+        /// <summary>Call before any change to the marker list.</summary>
+        void PushUndo()
+        {
+            if (current == null) return;
+            current.Undo.Push(Snapshot(markers));
+            if (current.Undo.Count > 200) current.Undo = new Stack<List<Marker>>(current.Undo.Reverse().Skip(current.Undo.Count - 200).Reverse());
+            current.Redo.Clear();
+        }
+
+        void UndoMarkers()
+        {
+            if (current == null || current.Undo.Count == 0) return;
+            current.Redo.Push(Snapshot(markers));
+            RestoreMarkers(current.Undo.Pop());
+            InfoText.Text = $"Undo  ({current.Undo.Count} left)";
+        }
+
+        void RedoMarkers()
+        {
+            if (current == null || current.Redo.Count == 0) return;
+            current.Undo.Push(Snapshot(markers));
+            RestoreMarkers(current.Redo.Pop());
+            InfoText.Text = $"Redo  ({current.Redo.Count} left)";
+        }
+
+        void RestoreMarkers(List<Marker> state)
+        {
+            markers.Clear(); markers.AddRange(state);
+            selectedMarker = null; MarkDirty();
+            RefreshMarkerList(); RefreshOverlays();
+        }
 
         async Task LoadEntry(FileEntry entry)
         {
@@ -222,7 +268,7 @@ namespace WavMarker
                 audio = data; filePath = path; playhead = 0; spec = null;
                 viewStart = 0; viewLen = audio.Length;
                 markers = entry.Markers; selectedMarker = null;
-                Title = "SpectroMark - " + System.IO.Path.GetFileName(path);
+                UpdateDirtyIndicator();
                 string chDesc = audio.ChannelCount switch { 1 => "MONO (1 channel)", 2 => "STEREO (2 channels)", _ => audio.ChannelCount + " channels" };
                 InfoText.Text = $"{System.IO.Path.GetFileName(path)}   |   {chDesc}   |   {audio.SampleRate} Hz   |   {FormatTime(audio.Duration)}   |   analysing spectrogram...";
                 InvalidateOverview(); InvalidateSpec(); UpdateScrollBar(); DrawRuler(); RefreshOverlays(); UpdateTimeText();
@@ -661,6 +707,7 @@ namespace WavMarker
         {
             if (audio == null) return;
             long pos = playing ? CurrentPlaybackSample() : playhead;
+            PushUndo();
             var mk = new Marker { Sample = pos };
             markers.Add(mk);
             markers.Sort((a, b) => a.Sample.CompareTo(b.Sample));
@@ -710,6 +757,7 @@ namespace WavMarker
         void DeleteSelected()
         {
             if (selectedMarker == null) return;
+            PushUndo();
             markers.Remove(selectedMarker); selectedMarker = null; MarkDirty();
             RefreshMarkerList(); RefreshOverlays();
         }
@@ -718,6 +766,7 @@ namespace WavMarker
         {
             if (markers.Count == 0) return;
             if (MessageBox.Show("Remove all markers?", "SpectroMark", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+            PushUndo();
             markers.Clear(); selectedMarker = null; MarkDirty(); RefreshMarkerList(); RefreshOverlays();
         }
 
@@ -744,7 +793,7 @@ namespace WavMarker
             try
             {
                 WavCues.Write(fe.Path, fe.Markers);
-                fe.Dirty = false;
+                fe.Dirty = false; UpdateDirtyIndicator();
                 return true;
             }
             catch (Exception ex)
@@ -784,6 +833,9 @@ namespace WavMarker
                 case Key.Right: SeekTo(playhead + audio.SampleRate * (shift ? 0.1 : 1)); EnsurePlayheadVisible(); e.Handled = true; break;
                 case Key.Delete: DeleteSelected(); e.Handled = true; break;
                 case Key.S when Keyboard.Modifiers.HasFlag(ModifierKeys.Control): SaveMarkers_Click(null, null); e.Handled = true; break;
+                case Key.Z when Keyboard.Modifiers.HasFlag(ModifierKeys.Control) && shift: RedoMarkers(); e.Handled = true; break;
+                case Key.Z when Keyboard.Modifiers.HasFlag(ModifierKeys.Control): UndoMarkers(); e.Handled = true; break;
+                case Key.Y when Keyboard.Modifiers.HasFlag(ModifierKeys.Control): RedoMarkers(); e.Handled = true; break;
                 case Key.Add: case Key.OemPlus: ZoomAt(SampleToX(playhead), 1.5); e.Handled = true; break;
                 case Key.Subtract: case Key.OemMinus: ZoomAt(SampleToX(playhead), 1 / 1.5); e.Handled = true; break;
             }
@@ -828,6 +880,7 @@ namespace WavMarker
                 var mk = MarkerNear(p.X);
                 if (mk != null)
                 {
+                    PushUndo();
                     selectedMarker = mk; draggingMarker = true; SpecHost.CaptureMouse();
                     RefreshMarkerList(); RefreshOverlays();
                 }

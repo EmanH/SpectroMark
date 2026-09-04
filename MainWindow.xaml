@@ -29,6 +29,7 @@
                     <Button Content="Drop Marker  (M)" Click="Marker_Click" Background="#3a3a10" Foreground="#FFEB3B"/>
                     <Button Content="Save" Click="SaveMarkers_Click"/>
                     <Button Content="Save All" Click="SaveAll_Click"/>
+                    <TextBlock x:Name="DirtyText" Text="" Foreground="#FFEB3B" FontSize="16" FontWeight="Bold" Margin="0,0,12,0" ToolTip="Unsaved marker changes"/>
                     <CheckBox x:Name="LogFreqChk" Content="Log frequency" Foreground="#ccc" VerticalAlignment="Center" Margin="10,0" Checked="Spec_SettingChanged" Unchecked="Spec_SettingChanged"/>
                     <TextBlock Text="Floor dB" Margin="8,0,4,0"/>
                     <Slider x:Name="FloorSlider" Minimum="-130" Maximum="-40" Value="-100" Width="120" VerticalAlignment="Center" ValueChanged="Spec_SettingChanged"/>
@@ -39,7 +40,7 @@
         <!-- Status / hints -->
         <Border DockPanel.Dock="Bottom" Background="#1e1e1e" Padding="10,3" BorderBrush="#333" BorderThickness="0,1,0,0">
             <TextBlock FontSize="11" Foreground="#888"
-                       Text="Ctrl+S: save markers into WAV   Space: play/pause   M: drop marker   Home: to start   ←/→: nudge 1s   Delete: remove selected marker   |   Left-click/drag: scrub   Wheel: zoom   Shift+Wheel: pan   Middle-drag: pan   |   Right-click a marker and drag to move it"/>
+                       Text="Ctrl+Z / Ctrl+Shift+Z: undo / redo   Ctrl+S: save markers into WAV   Space: play/pause   M: drop marker   Home: to start   ←/→: nudge 1s   Delete: remove selected marker   |   Left-click/drag: scrub   Wheel: zoom   Shift+Wheel: pan   Middle-drag: pan   |   Right-click a marker and drag to move it"/>
         </Border>
         <Grid>
             <Grid.ColumnDefinitions>

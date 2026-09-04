@@ -24,6 +24,7 @@ Open a file, press **Space** to play, press **M** to drop a marker. That's it.
 | ← / → | Nudge 1 s (Shift: 0.1 s) |
 | + / - | Zoom in / out |
 | Delete | Remove selected marker |
+| Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) | Undo / redo marker changes (per file) |
 | Ctrl+S | Save markers into the WAV |
 
 The published exe is compressed (about 70 MB); it bundles the whole .NET runtime so nothing needs installing.
