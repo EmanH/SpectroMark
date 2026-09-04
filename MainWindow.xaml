@@ -30,7 +30,7 @@
                     <Button Content="Save" Click="SaveMarkers_Click"/>
                     <Button Content="Save All" Click="SaveAll_Click"/>
                     <TextBlock x:Name="DirtyText" Text="" Foreground="#FFEB3B" FontSize="16" FontWeight="Bold" Margin="0,0,12,0" ToolTip="Unsaved marker changes"/>
-                    <CheckBox x:Name="LogFreqChk" Content="Log frequency" Foreground="#ccc" VerticalAlignment="Center" Margin="10,0" Checked="Spec_SettingChanged" Unchecked="Spec_SettingChanged"/>
+                    <CheckBox x:Name="LogFreqChk" Content="Log frequency" IsChecked="True" Foreground="#ccc" VerticalAlignment="Center" Margin="10,0" Checked="Spec_SettingChanged" Unchecked="Spec_SettingChanged"/>
                     <TextBlock Text="Floor dB" Margin="8,0,4,0"/>
                     <Slider x:Name="FloorSlider" Minimum="-130" Maximum="-40" Value="-100" Width="120" VerticalAlignment="Center" ValueChanged="Spec_SettingChanged"/>
                     <TextBlock x:Name="InfoText" Margin="20,0,0,0" Text="Open a WAV file (or drag one in)"/>
