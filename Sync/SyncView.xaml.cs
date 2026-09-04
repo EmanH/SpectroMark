@@ -42,6 +42,7 @@ namespace WavMarker.Sync
         int selectedLane = -1;
         SyncTrack tempSolo;            // lane soloed while S is held
         bool bandActive, bandDragging; Point bandStart, bandEnd;   // Ctrl+drag batch-sync selection
+        List<(SyncTrack t, Marker m)> dragGroup; bool groupDragActive, groupDragging; double groupPressX; long groupPressTime;   // dragging a synced group along the timeline
         (SyncTrack t, Marker m) hover;
 
         // undo
@@ -634,6 +635,18 @@ namespace WavMarker.Sync
                     if (pt != null) { PushUndo(); t.RemovePoint(pt); ScheduleRender(t); RefreshOverlay(); RebuildHeaders(); SetStatus($"Removed sync point on {t.Name}"); }
                     return;
                 }
+                if (m != null && t.PointAt(m.Sample) != null)
+                {
+                    // press on a synced marker: drag the whole group along the timeline
+                    long time = t.SourceToTimeline(m.Sample); long tol = Math.Max(2, sampleRate / 500);
+                    dragGroup = new List<(SyncTrack, Marker)>();
+                    foreach (var other in tracks)
+                        foreach (var om in other.Markers)
+                            if (other.PointAt(om.Sample) != null && Math.Abs(other.SourceToTimeline(om.Sample) - time) <= tol) { dragGroup.Add((other, om)); break; }
+                    groupDragActive = true; groupDragging = false; groupPressX = p.X; groupPressTime = time;
+                    LaneHost.CaptureMouse();
+                    return;
+                }
                 int lane = LaneAt(p.Y); if (lane < 0) return;
                 if (selectedLane != lane) { selectedLane = lane; InvalidateLanes(); RebuildHeaders(); }
                 pressed = true; pressLane = lane; pressX = p.X; pressOffset = tracks[lane].Offset; draggingClip = false;
@@ -646,6 +659,19 @@ namespace WavMarker.Sync
         {
             if (tracks.Count == 0) return;
             var p = e.GetPosition(LaneHost);
+            if (groupDragActive)
+            {
+                if (!groupDragging && Math.Abs(p.X - groupPressX) >= 4) { PushUndo(); groupDragging = true; Mouse.OverrideCursor = Cursors.SizeWE; }
+                if (groupDragging)
+                {
+                    long newTime = groupPressTime + (long)((p.X - groupPressX) / LaneW * viewLen);
+                    foreach (var (gt, gm) in dragGroup) gt.AddOrUpdatePoint(gm.Sample, newTime - gt.Offset);
+                    anchorTime = newTime;
+                    RefreshOverlay(); UpdateScrollBar(); UpdateTime();
+                    SyncHint.Text = $"Moving group of {dragGroup.Count} lane(s) to {FormatTime((double)newTime / sampleRate)}";
+                }
+                return;
+            }
             if (bandActive)
             {
                 bandEnd = p;
@@ -667,11 +693,25 @@ namespace WavMarker.Sync
             if (pressed && pressLane < 0) { viewStart -= (p.X - pressX) / LaneW * viewLen; pressX = p.X; ViewChanged(); return; }
             var h = HitMarker(p);
             if (h.Item1 != hover.t || h.Item2 != hover.m) { hover = h; RefreshOverlay(); }
-            if (!sHeld) Mouse.OverrideCursor = h.Item2 != null ? Cursors.Hand : null;
+            if (!sHeld) Mouse.OverrideCursor = h.Item2 != null ? (h.Item1.PointAt(h.Item2.Sample) != null ? Cursors.SizeWE : Cursors.Hand) : null;
         }
 
         void Lane_MouseUp(object sender, MouseButtonEventArgs e)
         {
+            if (groupDragActive && e.ChangedButton == MouseButton.Left)
+            {
+                groupDragActive = false; LaneHost.ReleaseMouseCapture(); Mouse.OverrideCursor = null;
+                if (groupDragging)
+                {
+                    foreach (var (gt, _) in dragGroup) ScheduleRender(gt);
+                    InvalidateLanes(); InvalidateNav(); RefreshOverlay(); RebuildHeaders();
+                    SetStatus($"Group moved to {FormatTime((double)anchorTime / sampleRate)}");
+                    if (!sHeld) { anchorTrack = null; SyncHint.Text = ""; }
+                }
+                else { int lane = LaneAt(e.GetPosition(LaneHost).Y); if (lane >= 0 && selectedLane != lane) { selectedLane = lane; InvalidateLanes(); RebuildHeaders(); } }
+                groupDragging = false; dragGroup = null;
+                return;
+            }
             if (bandActive && e.ChangedButton == MouseButton.Left)
             {
                 bandActive = false; LaneHost.ReleaseMouseCapture();
