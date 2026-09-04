@@ -12,6 +12,8 @@
                 <Button Content="Save Session" Click="SaveSession_Click" ToolTip="Ctrl+S"/>
                 <Button Content="Save As..." Click="SaveSessionAs_Click" ToolTip="Ctrl+Shift+S"/>
                 <Button Content="Export Synced WAVs..." Click="Export_Click" Background="#16323e" BorderBrush="#2c5a70" Foreground="#7FD7FF"/>
+                <TextBlock Text="Playhead" Margin="12,0,4,0"/>
+                <ToggleButton x:Name="FollowBtn" Content="Page" IsChecked="False" Click="Follow_Click" ToolTip="Checked: playhead stays centred and the view scrolls continuously.  Unchecked: view pages when the playhead reaches the edge."/>
                 <TextBlock Text="Stretch" Margin="12,0,4,0"/>
                 <ComboBox x:Name="ModeBox" Width="110" SelectionChanged="Mode_Changed" VerticalAlignment="Center"/>
                 <TextBlock x:Name="DirtyText" Text="" Foreground="#FFEB3B" FontSize="16" FontWeight="Bold" Margin="4,0,12,0" ToolTip="Unsaved session changes"/>

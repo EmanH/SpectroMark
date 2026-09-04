@@ -433,6 +433,14 @@ namespace WavMarker.Sync
 
         void Play_Click(object sender, RoutedEventArgs e) => TogglePlay();
 
+        bool followPlayhead;
+        void Follow_Click(object sender, RoutedEventArgs e)
+        {
+            followPlayhead = FollowBtn.IsChecked == true;
+            FollowBtn.Content = followPlayhead ? "Scroll" : "Page";
+            if (followPlayhead && playing) { viewStart = playhead - viewLen / 2; ViewChanged(); }
+        }
+
         public void TogglePlay() { if (tracks.Count == 0) return; if (playing) StopPlayback(); else StartPlayback(); }
 
         void StartPlayback()
@@ -459,7 +467,8 @@ namespace WavMarker.Sync
             if (!playing) return;
             playhead = CurrentSample();
             if (playhead >= EndFrame) { StopPlayback(); playhead = EndFrame; RefreshPlayhead(); UpdateTime(); return; }
-            if (playhead > viewStart + viewLen || playhead < viewStart) { viewStart = playhead - viewLen * 0.05; ViewChanged(); }
+            if (followPlayhead) { viewStart = playhead - viewLen / 2; ViewChanged(); }
+            else if (playhead > viewStart + viewLen || playhead < viewStart) { viewStart = playhead - viewLen * 0.05; ViewChanged(); }
             RefreshPlayhead(); UpdateTime();
             if (engine.Underruns > 0 && !Status.Text.StartsWith("Audio underruns")) SetStatus($"Audio underruns: {engine.Underruns} ({engine.DeviceName})");
         }
