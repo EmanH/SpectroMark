@@ -14,7 +14,8 @@
                 <Button Content="Export Synced WAVs..." Click="Export_Click" Background="#16323e" BorderBrush="#2c5a70" Foreground="#7FD7FF"/>
                 <TextBlock Text="Stretch" Margin="12,0,4,0"/>
                 <ComboBox x:Name="ModeBox" Width="110" SelectionChanged="Mode_Changed" VerticalAlignment="Center"/>
-                <TextBlock x:Name="SyncHint" Margin="20,0,0,0" Foreground="#FFEB3B" FontWeight="Bold" Text=""/>
+                <TextBlock x:Name="DirtyText" Text="" Foreground="#FFEB3B" FontSize="16" FontWeight="Bold" Margin="4,0,12,0" ToolTip="Unsaved session changes"/>
+                <TextBlock x:Name="SyncHint" Margin="12,0,0,0" Foreground="#FFEB3B" FontWeight="Bold" Text=""/>
                 <TextBlock x:Name="Status" Margin="20,0,0,0"/>
             </StackPanel>
         </Border>

@@ -46,6 +46,11 @@ namespace WavMarker.Sync
 
         public TextBlock TimeDisplay;     // set by MainWindow
         string sessionPath;
+        bool dirty;
+        public bool Dirty => dirty;
+        public string SessionName => sessionPath == null ? null : System.IO.Path.GetFileName(sessionPath);
+        public event Action DirtyChanged;
+        void SetDirty(bool d) { dirty = d; DirtyText.Text = d ? "* unsaved" : ""; DirtyChanged?.Invoke(); }
         public event Action<string> StatusChanged;
 
         static readonly Color[] Palette = { Color.FromRgb(102, 217, 255), Color.FromRgb(255, 170, 80), Color.FromRgb(140, 255, 140), Color.FromRgb(255, 120, 200), Color.FromRgb(200, 170, 255), Color.FromRgb(255, 240, 120), Color.FromRgb(120, 230, 210), Color.FromRgb(255, 140, 140) };
@@ -114,13 +119,14 @@ namespace WavMarker.Sync
             }
             if (tracks.Count > 0 && viewLen <= 0) { viewStart = 0; viewLen = Math.Max(1, EndFrame); }
             RebuildHeaders(); ViewChanged(); InvalidateNav(); UpdateTime();
+            if (!loadingSession && tracks.Count > 0) SetDirty(true);
             SetStatus($"{tracks.Count} clip(s)");
         }
 
         void RemoveTrack(SyncTrack t)
         {
             StopPlayback();
-            tracks.Remove(t);
+            tracks.Remove(t); SetDirty(true);
             RebuildHeaders(); ViewChanged(); InvalidateNav();
         }
 
@@ -665,9 +671,9 @@ namespace WavMarker.Sync
             RebuildHeaders(); ViewChanged(); InvalidateNav(); UpdateTime();
         }
 
-        void PushUndo() { undo.Push(JsonSerializer.Serialize(Capture())); redo.Clear(); }
-        void Undo() { if (undo.Count == 0) return; redo.Push(JsonSerializer.Serialize(Capture())); ApplyState(JsonSerializer.Deserialize<SessionState>(undo.Pop())); SetStatus($"Undo ({undo.Count} left)"); }
-        void Redo() { if (redo.Count == 0) return; undo.Push(JsonSerializer.Serialize(Capture())); ApplyState(JsonSerializer.Deserialize<SessionState>(redo.Pop())); SetStatus("Redo"); }
+        void PushUndo() { undo.Push(JsonSerializer.Serialize(Capture())); redo.Clear(); SetDirty(true); }
+        void Undo() { if (undo.Count == 0) return; redo.Push(JsonSerializer.Serialize(Capture())); ApplyState(JsonSerializer.Deserialize<SessionState>(undo.Pop())); SetDirty(true); SetStatus($"Undo ({undo.Count} left)"); }
+        void Redo() { if (redo.Count == 0) return; undo.Push(JsonSerializer.Serialize(Capture())); ApplyState(JsonSerializer.Deserialize<SessionState>(redo.Pop())); SetDirty(true); SetStatus("Redo"); }
 
         void SaveSession_Click(object sender, RoutedEventArgs e) => SaveSession(false);
         void SaveSessionAs_Click(object sender, RoutedEventArgs e) => SaveSession(true);
@@ -682,6 +688,7 @@ namespace WavMarker.Sync
                 sessionPath = dlg.FileName;
             }
             File.WriteAllText(sessionPath, JsonSerializer.Serialize(Capture(), new JsonSerializerOptions { WriteIndented = true }));
+            SetDirty(false);
             SetStatus("Session saved: " + System.IO.Path.GetFileName(sessionPath));
         }
 
@@ -692,14 +699,28 @@ namespace WavMarker.Sync
             await LoadSession(dlg.FileName);
         }
 
+        bool loadingSession;
+
+        /// <summary>Ask about unsaved changes. Returns false if the user cancelled.</summary>
+        public bool ConfirmDiscard()
+        {
+            if (!dirty || tracks.Count == 0) return true;
+            var r = MessageBox.Show("The sync session has unsaved changes. Save it?", "SpectroMark", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            if (r == MessageBoxResult.Cancel) return false;
+            if (r == MessageBoxResult.Yes) { SaveSession(false); if (dirty) return false; }
+            return true;
+        }
+
         public async Task LoadSession(string path)
         {
+            if (!ConfirmDiscard()) return;
             var st = JsonSerializer.Deserialize<SessionState>(File.ReadAllText(path));
-            StopPlayback(); tracks.Clear(); viewLen = 0;
+            StopPlayback(); tracks.Clear(); viewLen = 0; loadingSession = true;
             if (Enum.TryParse<StretchMode>(st.Mode, out var m)) { mode = m; ModeBox.SelectedIndex = Array.IndexOf(StretchEngine.Modes, mode); }
             await AddFiles(st.Tracks.Select(t => t.Path).Where(File.Exists).ToArray());
-            ApplyState(st);
-            sessionPath = path;
+            ApplyState(st); loadingSession = false;
+            sessionPath = path; undo.Clear(); redo.Clear();
+            SetDirty(false);
             SetStatus("Session loaded: " + System.IO.Path.GetFileName(path));
         }
 

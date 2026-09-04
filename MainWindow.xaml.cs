@@ -116,12 +116,14 @@ namespace WavMarker
                 FileList.ItemsSource = files;
                 SyncPane.TimeDisplay = TimeText;
                 SyncPane.StatusChanged += msg => { if (syncMode) InfoText.Text = msg; };
+                SyncPane.DirtyChanged += () => { if (syncMode) UpdateDirtyIndicator(); };
                 var args = Environment.GetCommandLineArgs().Skip(1).Where(File.Exists).ToArray();
                 if (args.Length > 0) AddFiles(args);
             };
             Closing += (_, e) =>
             {
-                StopPlayback();
+                StopPlayback(); SyncPane.StopPlayback();
+                if (!SyncPane.ConfirmDiscard()) { e.Cancel = true; return; }
                 if (files.Any(f => f.Dirty))
                 {
                     var r = MessageBox.Show("Some files have unsaved markers. Save them all before closing?", "SpectroMark", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
@@ -148,7 +150,7 @@ namespace WavMarker
             bool sync = SyncModeBtn.IsChecked == true;
             if (sync == syncMode) return;
             syncMode = sync;
-            if (sync) { StopPlayback(); MarkerRoot.Visibility = Visibility.Collapsed; SyncPane.Visibility = Visibility.Visible; MarkerTools.Visibility = Visibility.Collapsed; SyncPane.Focus(); InfoText.Text = ""; }
+            if (sync) { StopPlayback(); MarkerRoot.Visibility = Visibility.Collapsed; SyncPane.Visibility = Visibility.Visible; MarkerTools.Visibility = Visibility.Collapsed; SyncPane.Focus(); InfoText.Text = ""; UpdateDirtyIndicator(); }
             else { SyncPane.StopPlayback(); SyncPane.Visibility = Visibility.Collapsed; MarkerRoot.Visibility = Visibility.Visible; MarkerTools.Visibility = Visibility.Visible; UpdateTimeText(); UpdateDirtyIndicator(); }
         }
 
@@ -230,6 +232,12 @@ namespace WavMarker
 
         void UpdateDirtyIndicator()
         {
+            if (syncMode)
+            {
+                DirtyText.Text = SyncPane.Dirty ? "* unsaved" : "";
+                Title = "SpectroMark - Sync" + (SyncPane.SessionName != null ? " - " + (SyncPane.Dirty ? "* " : "") + SyncPane.SessionName : (SyncPane.Dirty ? " *" : ""));
+                return;
+            }
             bool cur = current?.Dirty == true;
             int others = files.Count(f => f.Dirty && f != current);
             DirtyText.Text = cur ? "* unsaved" + (others > 0 ? $" (+{others})" : "") : (others > 0 ? $"({others} unsaved)" : "");
