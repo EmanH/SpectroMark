@@ -27,6 +27,8 @@ namespace WavMarker.Sync
         StretchMode mode = StretchMode.Tonal;
 
         WriteableBitmap bmp; int[] px; double dpiScale = 1;
+        WriteableBitmap navBmp; int[] navPx; bool navDirty;
+        bool navDragging; double navDragOffset;
         readonly DispatcherTimer renderTimer = new() { Interval = TimeSpan.FromMilliseconds(15) };
         bool lanesDirty;
 
@@ -43,6 +45,7 @@ namespace WavMarker.Sync
         readonly Stack<string> undo = new(); readonly Stack<string> redo = new();
 
         public TextBlock TimeDisplay;     // set by MainWindow
+        string sessionPath;
         public event Action<string> StatusChanged;
 
         static readonly Color[] Palette = { Color.FromRgb(102, 217, 255), Color.FromRgb(255, 170, 80), Color.FromRgb(140, 255, 140), Color.FromRgb(255, 120, 200), Color.FromRgb(200, 170, 255), Color.FromRgb(255, 240, 120), Color.FromRgb(120, 230, 210), Color.FromRgb(255, 140, 140) };
@@ -54,10 +57,11 @@ namespace WavMarker.Sync
             ModeBox.SelectedIndex = Array.IndexOf(StretchEngine.Modes, mode);
             ModeBox.ToolTip = string.Join("\n", StretchEngine.Modes.Select(StretchEngine.Describe));
             timer.Tick += (_, _) => UpdatePlayhead();
-            renderTimer.Tick += (_, _) => { renderTimer.Stop(); if (lanesDirty) RenderLanes(); lanesDirty = false; };
+            renderTimer.Tick += (_, _) => { renderTimer.Stop(); if (lanesDirty) RenderLanes(); if (navDirty) RenderNav(); lanesDirty = navDirty = false; };
             LaneHost.SizeChanged += (_, _) => { ClampVScroll(); InvalidateLanes(); RefreshOverlay(); RefreshPlayhead(); RebuildHeaders(); };
             Ruler.SizeChanged += (_, _) => DrawRuler();
-            Overlay.Draw = DrawOverlay; PlayheadLayer.Draw = DrawPlayhead;
+            Overlay.Draw = DrawOverlay; PlayheadLayer.Draw = DrawPlayhead; NavOverlay.Draw = DrawNav;
+            NavHost.SizeChanged += (_, _) => { InvalidateNav(); };
             engine.PlaybackEnded += () => Dispatcher.BeginInvoke(() => { if (playing && engine.IsPlaying == false) { } });
             Headers.MouseWheel += Headers_MouseWheel;
             Loaded += (_, _) => { var src = PresentationSource.FromVisual(this); if (src?.CompositionTarget != null) dpiScale = src.CompositionTarget.TransformToDevice.M11; };
@@ -100,7 +104,7 @@ namespace WavMarker.Sync
                 tracks.Add(t);
             }
             if (tracks.Count > 0 && viewLen <= 0) { viewStart = 0; viewLen = Math.Max(1, EndFrame); }
-            RebuildHeaders(); ViewChanged(); UpdateTime();
+            RebuildHeaders(); ViewChanged(); InvalidateNav(); UpdateTime();
             SetStatus($"{tracks.Count} clip(s)");
         }
 
@@ -108,7 +112,7 @@ namespace WavMarker.Sync
         {
             StopPlayback();
             tracks.Remove(t);
-            RebuildHeaders(); ViewChanged();
+            RebuildHeaders(); ViewChanged(); InvalidateNav();
         }
 
         // ---------------- rendering of stretched audio ----------------
@@ -126,7 +130,7 @@ namespace WavMarker.Sync
                 Dispatcher.BeginInvoke(() =>
                 {
                     t.Rendering = false;
-                    InvalidateLanes(); RefreshOverlay(); RebuildHeaders(); UpdateScrollBar();
+                    InvalidateLanes(); InvalidateNav(); RefreshOverlay(); RebuildHeaders(); UpdateScrollBar();
                     if (t.RenderedVersion != t.RenderVersion) ScheduleRender(t);
                 });
             });
@@ -156,11 +160,11 @@ namespace WavMarker.Sync
                 var panel = new StackPanel { Margin = new Thickness(6, 4, 4, 0) };
                 panel.Children.Add(new TextBlock { Text = t.Name, Foreground = new SolidColorBrush(col), FontWeight = FontWeights.Bold, TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = t.Path });
                 var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
-                var mute = new ToggleButton { Content = "M", Width = 24, IsChecked = t.Mute, Focusable = false, Background = new SolidColorBrush(Color.FromRgb(60, 40, 40)), Foreground = Brushes.White };
+                var mute = new ToggleButton { Content = "M", Width = 26, Padding = new Thickness(0, 2, 0, 2), IsChecked = t.Mute, ToolTip = "Mute" };
                 mute.Click += (_, _) => { t.Mute = mute.IsChecked == true; InvalidateLanes(); };
-                var solo = new ToggleButton { Content = "S", Width = 24, IsChecked = t.Solo, Focusable = false, Margin = new Thickness(3, 0, 0, 0), Background = new SolidColorBrush(Color.FromRgb(40, 60, 40)), Foreground = Brushes.White };
+                var solo = new ToggleButton { Content = "S", Width = 26, Padding = new Thickness(0, 2, 0, 2), IsChecked = t.Solo, Margin = new Thickness(3, 0, 0, 0), ToolTip = "Solo" };
                 solo.Click += (_, _) => { t.Solo = solo.IsChecked == true; InvalidateLanes(); };
-                var rm = new Button { Content = "✕", Width = 24, Margin = new Thickness(3, 0, 0, 0), Padding = new Thickness(0), Focusable = false, ToolTip = "Remove clip" };
+                var rm = new Button { Content = "✕", Width = 26, Margin = new Thickness(3, 0, 0, 0), Padding = new Thickness(0, 2, 0, 2), ToolTip = "Remove clip" };
                 rm.Click += (_, _) => RemoveTrack(t);
                 row.Children.Add(mute); row.Children.Add(solo); row.Children.Add(rm);
                 panel.Children.Add(row);
@@ -172,6 +176,71 @@ namespace WavMarker.Sync
         // ---------------- lane bitmap ----------------
 
         void InvalidateLanes() { lanesDirty = true; if (!renderTimer.IsEnabled) renderTimer.Start(); }
+        void InvalidateNav() { navDirty = true; if (!renderTimer.IsEnabled) renderTimer.Start(); }
+
+        // ---------------- navigator (whole project) ----------------
+
+        double NavW => NavHost.ActualWidth;
+        double NavSampleToX(double s) => EndFrame == 0 ? 0 : s / EndFrame * NavW;
+        double NavXToSample(double x) => x / NavW * Math.Max(1, EndFrame);
+
+        void RenderNav()
+        {
+            int W = (int)(NavW * dpiScale), H = (int)(NavHost.ActualHeight * dpiScale);
+            if (W < 2 || H < 2) return;
+            if (navBmp == null || navBmp.PixelWidth != W || navBmp.PixelHeight != H) { navBmp = new WriteableBitmap(W, H, 96, 96, PixelFormats.Bgra32, null); navPx = new int[W * H]; NavImage.Source = navBmp; }
+            Array.Fill(navPx, unchecked((int)0xFF0C0C0C));
+            int n = tracks.Count; long end = EndFrame;
+            if (n > 0 && end > 0)
+            {
+                int laneH = Math.Max(2, H / n);
+                for (int i = 0; i < n; i++)
+                {
+                    var t = tracks[i]; int top = i * laneH, center = top + laneH / 2, amp = Math.Max(1, laneH / 2 - 1);
+                    var c = Palette[i % Palette.Length]; int col = (255 << 24) | (c.R << 16) | (c.G << 8) | c.B;
+                    int Wl = W; var pxl = navPx;
+                    Parallel.For(0, Wl, x =>
+                    {
+                        long tl0 = (long)((double)x / Wl * end), tl1 = Math.Max(tl0 + 1, (long)((double)(x + 1) / Wl * end));
+                        long l0 = tl0 - t.Offset, l1 = tl1 - t.Offset;
+                        if (l1 <= 0 || l0 >= t.RenderedLength) return;
+                        t.Peak(Math.Max(0, l0), Math.Min(t.RenderedLength, l1), out float mn, out float mx);
+                        int y0 = center - (int)(mx * amp), y1 = center - (int)(mn * amp);
+                        for (int y = Math.Max(top, y0); y <= Math.Min(top + laneH - 1, y1); y++) pxl[y * Wl + x] = col;
+                    });
+                }
+            }
+            navBmp.WritePixels(new Int32Rect(0, 0, W, H), navPx, W * 4, 0);
+            NavOverlay.InvalidateVisual();
+        }
+
+        static readonly Brush NavViewFill = Freeze(new SolidColorBrush(Color.FromArgb(50, 120, 180, 255)));
+        static readonly Pen NavViewPen = Freeze(new Pen(new SolidColorBrush(Color.FromArgb(200, 120, 180, 255)), 1));
+
+        void DrawNav(DrawingContext dc)
+        {
+            if (tracks.Count == 0 || EndFrame == 0) return;
+            double x0 = NavSampleToX(viewStart), x1 = NavSampleToX(viewStart + viewLen);
+            dc.DrawRectangle(NavViewFill, NavViewPen, new Rect(x0, 0, Math.Max(2, x1 - x0), NavHost.ActualHeight));
+            double px = NavSampleToX(playhead);
+            dc.DrawLine(PlayheadPen, new Point(px, 0), new Point(px, NavHost.ActualHeight));
+        }
+
+        void Nav_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (tracks.Count == 0) return;
+            var p = e.GetPosition(NavHost); double s = NavXToSample(p.X);
+            if (s >= viewStart && s <= viewStart + viewLen && viewLen < EndFrame) { navDragging = true; navDragOffset = s - viewStart; NavHost.CaptureMouse(); }
+            else { SeekTo((long)s); if (viewLen < EndFrame) { viewStart = s - viewLen / 2; ViewChanged(); } }
+        }
+
+        void Nav_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (!navDragging) return;
+            viewStart = NavXToSample(e.GetPosition(NavHost).X) - navDragOffset; ViewChanged();
+        }
+
+        void Nav_MouseUp(object sender, MouseButtonEventArgs e) { if (navDragging) { navDragging = false; NavHost.ReleaseMouseCapture(); } }
 
         void RenderLanes()
         {
@@ -207,7 +276,22 @@ namespace WavMarker.Sync
                         int y0 = center - (int)(mx * amp), y1 = center - (int)(mn * amp);
                         for (int y = Math.Max(Math.Max(0, top), y0); y <= Math.Min(Math.Min(H - 1, top + laneH - 1), y1); y++) pxl[y * Wl + x] = col;
                     });
-                    int sep = top + laneH - 1; if (sep >= 0 && sep < H) for (int x = 0; x < W; x++) px[sep * W + x] = unchecked((int)0xFF303030);
+                    // lane separator: 2 px, clearly visible but quiet
+                    for (int d = 1; d <= 2; d++) { int sep = top + laneH - d; if (sep >= 0 && sep < H) for (int x = 0; x < W; x++) px[sep * W + x] = d == 1 ? unchecked((int)0xFF3a3a3a) : unchecked((int)0xFF262626); }
+                }
+            }
+            if (n > 0 && viewLen > 0)
+            {
+                double secs = viewLen / sampleRate;
+                double[] steps = { 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600 };
+                double step = steps[^1];
+                foreach (var st in steps) if (st / secs * LaneW >= 70) { step = st; break; }
+                double t0 = Math.Floor(viewStart / sampleRate / step) * step;
+                for (double t = t0; t <= (viewStart + viewLen) / sampleRate; t += step)
+                {
+                    int gx = (int)(SampleToX(t * sampleRate) * dpiScale);
+                    if (gx < 0 || gx >= W) continue;
+                    for (int y = 0; y < H; y++) { int v = px[y * W + gx]; px[y * W + gx] = v == unchecked((int)0xFF101010) || v == unchecked((int)0xFF0C0C0C) || v == unchecked((int)0xFF1a1f26) || v == unchecked((int)0xFF161616) ? unchecked((int)0xFF222830) : v; }
                 }
             }
             bmp.WritePixels(new Int32Rect(0, 0, W, H), px, W * 4, 0);
@@ -230,7 +314,7 @@ namespace WavMarker.Sync
         static T Freeze<T>(T f) where T : Freezable { f.Freeze(); return f; }
 
         void RefreshOverlay() => Overlay.InvalidateVisual();
-        void RefreshPlayhead() => PlayheadLayer.InvalidateVisual();
+        void RefreshPlayhead() { PlayheadLayer.InvalidateVisual(); NavOverlay.InvalidateVisual(); }
 
         void DrawOverlay(DrawingContext dc)
         {
@@ -310,7 +394,7 @@ namespace WavMarker.Sync
             double total = Math.Max(1, EndFrame);
             viewLen = Math.Clamp(viewLen, sampleRate * 0.2, total);
             viewStart = Math.Clamp(viewStart, 0, Math.Max(0, total - viewLen));
-            InvalidateLanes(); RefreshOverlay(); RefreshPlayhead(); DrawRuler(); UpdateScrollBar();
+            InvalidateLanes(); RefreshOverlay(); RefreshPlayhead(); DrawRuler(); UpdateScrollBar(); NavOverlay.InvalidateVisual();
         }
 
         void UpdateScrollBar()
@@ -388,6 +472,8 @@ namespace WavMarker.Sync
             switch (e.Key)
             {
                 case Key.Space: TogglePlay(); return true;
+                case Key.S when ctrl && shift: SaveSession(true); return true;
+                case Key.S when ctrl: SaveSession(false); return true;
                 case Key.Home: SeekTo(0); viewStart = 0; ViewChanged(); return true;
                 case Key.Left: SeekTo(playhead - (long)(sampleRate * (shift ? 0.1 : 1))); return true;
                 case Key.Right: SeekTo(playhead + (long)(sampleRate * (shift ? 0.1 : 1))); return true;
@@ -444,7 +530,7 @@ namespace WavMarker.Sync
                 {
                     var t = tracks[pressLane];
                     t.Offset = pressOffset + (long)((p.X - pressX) / LaneW * viewLen);
-                    InvalidateLanes(); RefreshOverlay(); UpdateScrollBar(); UpdateTime();
+                    InvalidateLanes(); InvalidateNav(); RefreshOverlay(); UpdateScrollBar(); UpdateTime();
                 }
                 return;
             }
@@ -507,6 +593,13 @@ namespace WavMarker.Sync
             if (anchorTrack == null)
             {
                 anchorTrack = t; anchorTime = t.SourceToTimeline(m.Sample); groupCount = 1;
+                if (t.PointAt(m.Sample) == null)
+                {
+                    // the anchor is pinned too: it becomes a fixed sync point on its own lane
+                    PushUndo();
+                    t.AddOrUpdatePoint(m.Sample, t.SourceToLocal(m.Sample));
+                    ScheduleRender(t); RebuildHeaders();
+                }
                 SyncHint.Text = $"SYNC anchor: {t.Name} @ {FormatTime((double)anchorTime / sampleRate)}  - click markers on other lanes";
                 RefreshOverlay(); return;
             }
@@ -554,20 +647,27 @@ namespace WavMarker.Sync
                 t.RenderVersion++;
                 ScheduleRender(t);
             }
-            RebuildHeaders(); ViewChanged(); UpdateTime();
+            RebuildHeaders(); ViewChanged(); InvalidateNav(); UpdateTime();
         }
 
         void PushUndo() { undo.Push(JsonSerializer.Serialize(Capture())); redo.Clear(); }
         void Undo() { if (undo.Count == 0) return; redo.Push(JsonSerializer.Serialize(Capture())); ApplyState(JsonSerializer.Deserialize<SessionState>(undo.Pop())); SetStatus($"Undo ({undo.Count} left)"); }
         void Redo() { if (redo.Count == 0) return; undo.Push(JsonSerializer.Serialize(Capture())); ApplyState(JsonSerializer.Deserialize<SessionState>(redo.Pop())); SetStatus("Redo"); }
 
-        void SaveSession_Click(object sender, RoutedEventArgs e)
+        void SaveSession_Click(object sender, RoutedEventArgs e) => SaveSession(false);
+        void SaveSessionAs_Click(object sender, RoutedEventArgs e) => SaveSession(true);
+
+        public void SaveSession(bool askPath)
         {
             if (tracks.Count == 0) return;
-            var dlg = new Microsoft.Win32.SaveFileDialog { Filter = "SpectroMark sync session|*.spectrosync.json", FileName = "sync-session.spectrosync.json", InitialDirectory = System.IO.Path.GetDirectoryName(tracks[0].Path) };
-            if (dlg.ShowDialog() != true) return;
-            File.WriteAllText(dlg.FileName, JsonSerializer.Serialize(Capture(), new JsonSerializerOptions { WriteIndented = true }));
-            SetStatus("Session saved: " + System.IO.Path.GetFileName(dlg.FileName));
+            if (askPath || sessionPath == null)
+            {
+                var dlg = new Microsoft.Win32.SaveFileDialog { Filter = "SpectroMark sync session|*.spectrosync.json", FileName = sessionPath != null ? System.IO.Path.GetFileName(sessionPath) : "sync-session.spectrosync.json", InitialDirectory = sessionPath != null ? System.IO.Path.GetDirectoryName(sessionPath) : System.IO.Path.GetDirectoryName(tracks[0].Path) };
+                if (dlg.ShowDialog() != true) return;
+                sessionPath = dlg.FileName;
+            }
+            File.WriteAllText(sessionPath, JsonSerializer.Serialize(Capture(), new JsonSerializerOptions { WriteIndented = true }));
+            SetStatus("Session saved: " + System.IO.Path.GetFileName(sessionPath));
         }
 
         async void OpenSession_Click(object sender, RoutedEventArgs e)
@@ -584,6 +684,7 @@ namespace WavMarker.Sync
             if (Enum.TryParse<StretchMode>(st.Mode, out var m)) { mode = m; ModeBox.SelectedIndex = Array.IndexOf(StretchEngine.Modes, mode); }
             await AddFiles(st.Tracks.Select(t => t.Path).Where(File.Exists).ToArray());
             ApplyState(st);
+            sessionPath = path;
             SetStatus("Session loaded: " + System.IO.Path.GetFileName(path));
         }
 

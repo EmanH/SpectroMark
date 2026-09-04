@@ -9,8 +9,9 @@
                 <Button Content="Add Clips..." Click="AddClips_Click"/>
                 <Button x:Name="PlayBtn" Content="Play  (Space)" Click="Play_Click" Width="120"/>
                 <Button Content="Open Session" Click="OpenSession_Click"/>
-                <Button Content="Save Session" Click="SaveSession_Click"/>
-                <Button Content="Export Synced WAVs..." Click="Export_Click" Background="#10303a" Foreground="#7FD7FF"/>
+                <Button Content="Save Session" Click="SaveSession_Click" ToolTip="Ctrl+S"/>
+                <Button Content="Save As..." Click="SaveSessionAs_Click" ToolTip="Ctrl+Shift+S"/>
+                <Button Content="Export Synced WAVs..." Click="Export_Click" Background="#16323e" BorderBrush="#2c5a70" Foreground="#7FD7FF"/>
                 <TextBlock Text="Stretch" Margin="12,0,4,0"/>
                 <ComboBox x:Name="ModeBox" Width="110" SelectionChanged="Mode_Changed" VerticalAlignment="Center"/>
                 <TextBlock x:Name="SyncHint" Margin="20,0,0,0" Foreground="#FFEB3B" FontWeight="Bold" Text=""/>
@@ -27,22 +28,31 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
+                <RowDefinition Height="80"/>
                 <RowDefinition Height="22"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="18"/>
             </Grid.RowDefinitions>
-            <Border Grid.Row="0" Grid.Column="0" Background="#1a1a1a"/>
-            <Canvas Grid.Row="0" Grid.Column="1" x:Name="Ruler" Background="#1a1a1a" ClipToBounds="True"/>
-            <Border Grid.Row="1" Grid.Column="0" Background="#1a1a1a" ClipToBounds="True">
+            <Border Grid.Row="0" Grid.Column="0" Background="#1a1a1a" BorderBrush="#2a2a2a" BorderThickness="0,0,0,1">
+                <TextBlock Text="PROJECT" FontSize="10" Foreground="#777" Margin="8,4" VerticalAlignment="Top"/>
+            </Border>
+            <Grid Grid.Row="0" Grid.Column="1" x:Name="NavHost" Background="#0c0c0c" ClipToBounds="True"
+                  MouseLeftButtonDown="Nav_MouseDown" MouseMove="Nav_MouseMove" MouseLeftButtonUp="Nav_MouseUp">
+                <Image x:Name="NavImage" Stretch="Fill"/>
+                <local:DrawLayer x:Name="NavOverlay" IsHitTestVisible="False"/>
+            </Grid>
+            <Border Grid.Row="1" Grid.Column="0" Background="#1a1a1a"/>
+            <Canvas Grid.Row="1" Grid.Column="1" x:Name="Ruler" Background="#1a1a1a" ClipToBounds="True"/>
+            <Border Grid.Row="2" Grid.Column="0" Background="#1a1a1a" ClipToBounds="True">
                 <StackPanel x:Name="Headers" VerticalAlignment="Top"/>
             </Border>
-            <Grid Grid.Row="1" Grid.Column="1" x:Name="LaneHost" Background="#0c0c0c" ClipToBounds="True"
+            <Grid Grid.Row="2" Grid.Column="1" x:Name="LaneHost" Background="#0c0c0c" ClipToBounds="True"
                   MouseDown="Lane_MouseDown" MouseMove="Lane_MouseMove" MouseUp="Lane_MouseUp" MouseWheel="Lane_MouseWheel" MouseLeave="Lane_MouseLeave">
                 <Image x:Name="LaneImage" Stretch="Fill"/>
                 <local:DrawLayer x:Name="Overlay" IsHitTestVisible="False"/>
                 <local:DrawLayer x:Name="PlayheadLayer" IsHitTestVisible="False"/>
             </Grid>
-            <ScrollBar Grid.Row="2" Grid.Column="1" x:Name="HScroll" Orientation="Horizontal" Scroll="HScroll_Scroll"/>
+            <ScrollBar Grid.Row="3" Grid.Column="1" x:Name="HScroll" Orientation="Horizontal" Scroll="HScroll_Scroll"/>
         </Grid>
     </DockPanel>
 </UserControl>

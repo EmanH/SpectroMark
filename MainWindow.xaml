@@ -5,41 +5,27 @@
         Title="SpectroMark" Icon="assets/SpectroMark.ico" Width="1500" Height="860" MinWidth="900" MinHeight="500"
         Background="#141414" WindowStartupLocation="CenterScreen"
         PreviewKeyDown="Window_PreviewKeyDown" PreviewKeyUp="Window_PreviewKeyUp" AllowDrop="True" Drop="Window_Drop">
-    <Window.Resources>
-        <Style TargetType="Button">
-            <Setter Property="Padding" Value="12,4"/>
-            <Setter Property="Margin" Value="0,0,8,0"/>
-            <Setter Property="Background" Value="#2d2d2d"/>
-            <Setter Property="Foreground" Value="#eee"/>
-            <Setter Property="BorderBrush" Value="#444"/>
-            <Setter Property="Focusable" Value="False"/>
-        </Style>
-        <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#ccc"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-        </Style>
-    </Window.Resources>
     <DockPanel>
         <!-- Toolbar -->
         <Border DockPanel.Dock="Top" Background="#1e1e1e" Padding="10,6" BorderBrush="#333" BorderThickness="0,0,0,1">
             <DockPanel>
                 <TextBlock x:Name="TimeText" DockPanel.Dock="Right" FontFamily="Consolas" FontSize="26" Foreground="#FFEB3B" Text="0:00.000 / 0:00.000" Margin="16,0,0,0"/>
                 <StackPanel Orientation="Horizontal">
-                    <Border BorderBrush="#444" BorderThickness="1" CornerRadius="3" Margin="0,0,14,0">
+                    <Border BorderBrush="#404040" BorderThickness="1" CornerRadius="3" Margin="0,0,14,0" ClipToBounds="True">
                         <StackPanel Orientation="Horizontal">
-                            <RadioButton x:Name="MarkerModeBtn" Content="Markers" IsChecked="True" Style="{StaticResource {x:Type ToggleButton}}" Padding="10,3" Background="#2d2d2d" Foreground="#eee" BorderThickness="0" Focusable="False" Checked="Mode_Checked"/>
-                            <RadioButton x:Name="SyncModeBtn" Content="Sync" Style="{StaticResource {x:Type ToggleButton}}" Padding="10,3" Background="#2d2d2d" Foreground="#eee" BorderThickness="0" Focusable="False" Checked="Mode_Checked"/>
+                            <RadioButton x:Name="MarkerModeBtn" Content="Markers" IsChecked="True" Style="{StaticResource SegmentRadio}" Checked="Mode_Checked"/>
+                            <RadioButton x:Name="SyncModeBtn" Content="Sync" Style="{StaticResource SegmentRadio}" Checked="Mode_Checked"/>
                         </StackPanel>
                     </Border>
                     <StackPanel Orientation="Horizontal" x:Name="MarkerTools">
                     <Button Content="Open WAV(s)..." Click="Open_Click"/>
                     <Button x:Name="PlayBtn" Content="Play  (Space)" Click="Play_Click" Width="120"/>
-                    <Button Content="Drop Marker  (M)" Click="Marker_Click" Background="#3a3a10" Foreground="#FFEB3B"/>
-                    <Button x:Name="AutoMarkBtn" Content="AutoMark" Click="AutoMark_Click" Background="#10303a" Foreground="#7FD7FF" ToolTip="Detect word starts, consonants and note changes and add markers"/>
+                    <Button Content="Drop Marker  (M)" Click="Marker_Click" Background="#3a3410" BorderBrush="#6a6020" Foreground="#FFEB3B"/>
+                    <Button x:Name="AutoMarkBtn" Content="AutoMark" Click="AutoMark_Click" Background="#16323e" BorderBrush="#2c5a70" Foreground="#7FD7FF" ToolTip="Detect word starts, consonants and note changes and add markers"/>
                     <Button Content="Save" Click="SaveMarkers_Click"/>
                     <Button Content="Save All" Click="SaveAll_Click"/>
                     <TextBlock x:Name="DirtyText" Text="" Foreground="#FFEB3B" FontSize="16" FontWeight="Bold" Margin="0,0,12,0" ToolTip="Unsaved marker changes"/>
-                    <CheckBox x:Name="LogFreqChk" Content="Log frequency" IsChecked="True" Foreground="#ccc" VerticalAlignment="Center" Margin="10,0" Checked="Spec_SettingChanged" Unchecked="Spec_SettingChanged"/>
+                    <CheckBox x:Name="LogFreqChk" Content="Log frequency" IsChecked="True" Margin="10,0" Checked="Spec_SettingChanged" Unchecked="Spec_SettingChanged"/>
                     <TextBlock Text="Speed" Margin="8,0,4,0"/>
                     <Slider x:Name="SpeedSlider" Minimum="1.0" Maximum="2.0" Value="1.0" TickFrequency="0.1" IsSnapToTickEnabled="True" TickPlacement="BottomRight" Width="150" VerticalAlignment="Center" ValueChanged="Speed_Changed" ToolTip="Playback speed (pitch preserved)"/>
                     <TextBlock x:Name="SpeedText" Text="1.0x" FontFamily="Consolas" Foreground="#7FD7FF" Width="38" Margin="4,0,8,0"/>
