@@ -430,6 +430,8 @@ namespace WavMarker.Sync
         {
             if (tracks.Count == 0) { InvalidateLanes(); RefreshOverlay(); DrawRuler(); return; }
             double total = Math.Max(1, EndFrame);
+            if (!Finite(viewLen) || viewLen <= 0) viewLen = total;
+            if (!Finite(viewStart)) viewStart = 0;
             viewLen = Math.Clamp(viewLen, sampleRate * 0.2, total);
             viewStart = Math.Clamp(viewStart, 0, Math.Max(0, total - viewLen));
             InvalidateLanes(); RefreshOverlay(); RefreshPlayhead(); DrawRuler(); UpdateScrollBar(); NavOverlay.InvalidateVisual();
@@ -741,6 +743,8 @@ namespace WavMarker.Sync
             public double WinLeft { get; set; } public double WinTop { get; set; } public double WinWidth { get; set; } public double WinHeight { get; set; } public bool WinMaximized { get; set; }
         }
 
+        static bool Finite(double v) => !double.IsNaN(v) && !double.IsInfinity(v);
+
         SessionState CaptureFull()
         {
             var st = Capture();
@@ -749,8 +753,13 @@ namespace WavMarker.Sync
             if (w != null)
             {
                 var b = w.WindowState == WindowState.Normal ? new Rect(w.Left, w.Top, w.Width, w.Height) : w.RestoreBounds;
+                if (b.IsEmpty || !Finite(b.Left) || !Finite(b.Top) || !Finite(b.Width) || !Finite(b.Height)) b = new Rect(0, 0, w.ActualWidth, w.ActualHeight);
                 st.WinLeft = b.Left; st.WinTop = b.Top; st.WinWidth = b.Width; st.WinHeight = b.Height; st.WinMaximized = w.WindowState == WindowState.Maximized;
             }
+            if (!Finite(st.ViewStart)) st.ViewStart = 0;
+            if (!Finite(st.ViewLen) || st.ViewLen <= 0) st.ViewLen = Math.Max(1, EndFrame);
+            if (!Finite(st.VScroll)) st.VScroll = 0;
+            if (!Finite(st.LaneHeight)) st.LaneHeight = 0;
             return st;
         }
 
@@ -810,9 +819,18 @@ namespace WavMarker.Sync
                 if (dlg.ShowDialog() != true) return;
                 sessionPath = dlg.FileName;
             }
-            File.WriteAllText(sessionPath, JsonSerializer.Serialize(CaptureFull(), new JsonSerializerOptions { WriteIndented = true }));
-            SetDirty(false);
-            SetStatus("Session saved: " + System.IO.Path.GetFileName(sessionPath));
+            try
+            {
+                var opts = new JsonSerializerOptions { WriteIndented = true, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
+                File.WriteAllText(sessionPath, JsonSerializer.Serialize(CaptureFull(), opts));
+                SetDirty(false);
+                SetStatus("Session saved: " + System.IO.Path.GetFileName(sessionPath));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Could not save the session:
+" + ex.Message, "SpectroMark", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         async void OpenSession_Click(object sender, RoutedEventArgs e)
@@ -837,7 +855,10 @@ namespace WavMarker.Sync
         public async Task LoadSession(string path)
         {
             if (!ConfirmDiscard()) return;
-            var st = JsonSerializer.Deserialize<SessionState>(File.ReadAllText(path));
+            SessionState st;
+            try { st = JsonSerializer.Deserialize<SessionState>(File.ReadAllText(path), new JsonSerializerOptions { NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }); }
+            catch (Exception ex) { MessageBox.Show("Could not read the session:
+" + ex.Message, "SpectroMark", MessageBoxButton.OK, MessageBoxImage.Error); return; }
             StopPlayback(); tracks.Clear(); viewLen = 0; loadingSession = true;
             if (Enum.TryParse<StretchMode>(st.Mode, out var m)) { mode = m; ModeBox.SelectedIndex = Array.IndexOf(StretchEngine.Modes, mode); }
             await AddFiles(st.Tracks.Select(t => t.Path).Where(File.Exists).ToArray());
