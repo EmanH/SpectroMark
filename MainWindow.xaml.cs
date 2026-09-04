@@ -14,12 +14,6 @@ using NAudio.Wave;
 
 namespace WavMarker
 {
-    public class Marker
-    {
-        public long Sample;
-        public string Name = "";
-    }
-
     public class FileEntry : System.ComponentModel.INotifyPropertyChanged
     {
         public string Path;
@@ -31,15 +25,6 @@ namespace WavMarker
         public bool Dirty { get => dirty; set { dirty = value; PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Display))); } }
         public string Display => (dirty ? "* " : "") + System.IO.Path.GetFileName(Path);
         public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
-    }
-
-    class AudioData
-    {
-        public float[][] Channels;
-        public int SampleRate;
-        public long Length;
-        public int ChannelCount => Channels.Length;
-        public double Duration => (double)Length / SampleRate;
     }
 
     class Spectrogram
@@ -264,7 +249,7 @@ namespace WavMarker
             InfoText.Text = "Loading " + System.IO.Path.GetFileName(path) + " ...";
             try
             {
-                var data = await Task.Run(() => ReadAudio(path));
+                var data = await Task.Run(() => AudioIO.Read(path));
                 if (FileList.SelectedItem != entry) return; // user clicked another file meanwhile
                 current = entry;
                 audio = data; filePath = path; playhead = 0; spec = null;
@@ -286,29 +271,6 @@ namespace WavMarker
                 MessageBox.Show("Could not open file:\n" + ex.Message, "SpectroMark", MessageBoxButton.OK, MessageBoxImage.Error);
                 InfoText.Text = "Failed to load.";
             }
-        }
-
-        static AudioData ReadAudio(string path)
-        {
-            using var reader = new AudioFileReader(path);
-            int ch = reader.WaveFormat.Channels;
-            int sr = reader.WaveFormat.SampleRate;
-            long totalFrames = reader.Length / (reader.WaveFormat.BitsPerSample / 8) / ch;
-            var chans = new float[ch][];
-            for (int c = 0; c < ch; c++) chans[c] = new float[totalFrames + 4096];
-            var buf = new float[sr * ch];
-            long pos = 0; int n;
-            while ((n = reader.Read(buf, 0, buf.Length)) > 0)
-            {
-                int frames = n / ch;
-                if (pos + frames > chans[0].Length)
-                    for (int c = 0; c < ch; c++) Array.Resize(ref chans[c], (int)(pos + frames + 65536));
-                for (int i = 0; i < frames; i++)
-                    for (int c = 0; c < ch; c++) chans[c][pos + i] = buf[i * ch + c];
-                pos += frames;
-            }
-            for (int c = 0; c < ch; c++) Array.Resize(ref chans[c], (int)pos);
-            return new AudioData { Channels = chans, SampleRate = sr, Length = pos };
         }
 
         // ---------------- spectrogram analysis ----------------
@@ -747,6 +709,31 @@ namespace WavMarker
         // ---------------- markers ----------------
 
         void Marker_Click(object sender, RoutedEventArgs e) => DropMarker();
+
+        async void AutoMark_Click(object sender, RoutedEventArgs e)
+        {
+            if (audio == null || current == null) return;
+            var entry = current; var data = audio;
+            AutoMarkBtn.IsEnabled = false; InfoText.Text = "AutoMark: analysing...";
+            try
+            {
+                var ev = await Task.Run(() => AutoMark.Detect(data));
+                if (current != entry) return;
+                PushUndo();
+                int added = 0;
+                foreach (var ev1 in ev)
+                {
+                    long smp = (long)(ev1.Time * data.SampleRate);
+                    if (markers.Any(m => Math.Abs(m.Sample - smp) < data.SampleRate * 0.08)) continue;
+                    markers.Add(new Marker { Sample = smp }); added++;
+                }
+                markers.Sort((a, b) => a.Sample.CompareTo(b.Sample));
+                MarkDirty(); RefreshMarkerList(); RefreshOverlays();
+                InfoText.Text = $"AutoMark added {added} markers ({ev.Count(x => x.Kind == "consonant")} consonants, {ev.Count(x => x.Kind == "onset")} onsets, {ev.Count(x => x.Kind == "pitch")} pitch changes)";
+            }
+            catch (Exception ex) { MessageBox.Show("AutoMark failed: " + ex.Message, "SpectroMark"); }
+            finally { AutoMarkBtn.IsEnabled = true; }
+        }
 
         void DropMarker()
         {

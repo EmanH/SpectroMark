@@ -15,6 +15,7 @@ Open a file, press **Space** to play, press **M** to drop a marker. That's it.
 - Bright flashing marker line when you hit **M**; click and drag a marker to move it
 - Marker list with time positions; **Delete** removes the selected marker
 - Markers are read from and written into the WAV file itself (standard RIFF `cue` + `LIST/adtl` chunks), so they show up in Adobe Audition, Reaper, Sound Forge and any other editor, and markers set in those tools show up here
+- **AutoMark**: one click detects word starts for you. It combines a consonant detector (S, T, D, K bursts in the 3.5 to 11 kHz band, marker placed at the centre of the burst), a vibrato-tolerant spectral-flux onset detector, and a pitch-step detector that catches a held vowel changing note. Results are deterministic, so the same file always gives the same markers. Undo removes them all in one step.
 - Playback speed slider from 1.0x to 2.0x in 0.1 steps, pitch preserved (SoundTouch time-stretch)
 - Log/linear frequency axis, adjustable dB floor
 - Open or drag in many files at once; they appear in a resizable file list on the left. Click to switch between them, unsaved files are marked with *, and Save / Save All / Close work per file

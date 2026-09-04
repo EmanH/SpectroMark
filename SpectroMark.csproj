@@ -8,7 +8,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>SpectroMark</AssemblyName>
     <ApplicationIcon>assets/SpectroMark.ico</ApplicationIcon>
-    <Version>1.3.0</Version>
+    <Version>1.4.0</Version>
     <RootNamespace>WavMarker</RootNamespace>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
@@ -17,6 +17,10 @@
     <DebugType>none</DebugType>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="tools/**" />
+    <None Remove="tools/**" />
+  </ItemGroup>
   <ItemGroup>
     <Resource Include="assets/SpectroMark.ico" />
   </ItemGroup>

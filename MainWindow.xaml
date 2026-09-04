@@ -27,6 +27,7 @@
                     <Button Content="Open WAV(s)..." Click="Open_Click"/>
                     <Button x:Name="PlayBtn" Content="Play  (Space)" Click="Play_Click" Width="120"/>
                     <Button Content="Drop Marker  (M)" Click="Marker_Click" Background="#3a3a10" Foreground="#FFEB3B"/>
+                    <Button x:Name="AutoMarkBtn" Content="AutoMark" Click="AutoMark_Click" Background="#10303a" Foreground="#7FD7FF" ToolTip="Detect word starts, consonants and note changes and add markers"/>
                     <Button Content="Save" Click="SaveMarkers_Click"/>
                     <Button Content="Save All" Click="SaveAll_Click"/>
                     <TextBlock x:Name="DirtyText" Text="" Foreground="#FFEB3B" FontSize="16" FontWeight="Bold" Margin="0,0,12,0" ToolTip="Unsaved marker changes"/>
