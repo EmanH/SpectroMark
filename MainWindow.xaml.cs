@@ -86,6 +86,8 @@ namespace WavMarker
         // playback
         WaveOutEvent waveOut;
         BufferProvider provider;
+        TempoProvider tempoProvider;
+        double playTempo = 1.0;
         long playhead;
         long playStartSample;
         bool playing;
@@ -660,6 +662,19 @@ namespace WavMarker
 
         void Play_Click(object sender, RoutedEventArgs e) => TogglePlay();
 
+        void Speed_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (SpeedText == null) return;
+            double t = Math.Round(e.NewValue, 1);
+            SpeedText.Text = t.ToString("0.0") + "x";
+            if (Math.Abs(t - playTempo) < 1e-6) return;
+            // restart playback from the current position so the played-sample counter stays exact
+            bool wasPlaying = playing;
+            if (wasPlaying) StopPlayback();
+            playTempo = t;
+            if (wasPlaying) StartPlayback();
+        }
+
         void TogglePlay()
         {
             if (audio == null) return;
@@ -671,8 +686,9 @@ namespace WavMarker
             if (audio == null) return;
             if (playhead >= audio.Length - 1) playhead = 0;
             provider = new BufferProvider(audio) { Position = playhead };
+            tempoProvider = new TempoProvider(provider, playTempo);
             var w = new WaveOutEvent { DesiredLatency = 120, NumberOfBuffers = 3 };
-            w.Init(provider);
+            w.Init(tempoProvider);
             w.PlaybackStopped += (_, _) => Dispatcher.BeginInvoke(() =>
             {
                 if (waveOut == w && playing) { StopPlayback(); playhead = audio.Length; PositionPlayheads(); UpdateTimeText(); }
@@ -701,7 +717,7 @@ namespace WavMarker
             if (!playing || waveOut == null || audio == null) return playhead;
             long bytes;
             try { bytes = waveOut.GetPosition(); } catch { return playhead; }
-            long frames = bytes / (4 * audio.ChannelCount);
+            long frames = (long)(bytes / (4 * audio.ChannelCount) * playTempo);
             return Math.Min(audio.Length, playStartSample + frames);
         }
 
