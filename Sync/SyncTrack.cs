@@ -5,6 +5,7 @@ namespace WavMarker.Sync
     {
         public long Source;
         public long Target;
+        public long BaseTime = -1;   // timeline position of this marker before it was first synced (-1 = unknown)
     }
 
     /// <summary>
@@ -141,12 +142,12 @@ namespace WavMarker.Sync
         }
 
         /// <summary>Adds the point unconditionally. Any existing points it would conflict with (time running backwards) are removed: the newest click wins.</summary>
-        public void AddOrUpdatePoint(long source, long localTarget)
+        public void AddOrUpdatePoint(long source, long localTarget, long baseTime = -1)
         {
             Points.RemoveAll(p => p.Source != source && ((p.Source < source && p.Target >= localTarget) || (p.Source > source && p.Target <= localTarget)));
             var existing = PointAt(source);
-            if (existing != null) existing.Target = localTarget;
-            else Points.Add(new StretchPoint { Source = source, Target = localTarget });
+            if (existing != null) { existing.Target = localTarget; if (existing.BaseTime < 0 && baseTime >= 0) existing.BaseTime = baseTime; }
+            else Points.Add(new StretchPoint { Source = source, Target = localTarget, BaseTime = baseTime });
             Points.Sort((a, b) => a.Source.CompareTo(b.Source));
             NormaliseFirstPin();
             RenderVersion++;

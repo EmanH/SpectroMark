@@ -628,7 +628,29 @@ namespace WavMarker.Sync
                 RestoreMember(existing);
                 group.Remove(existing);
             }
-            group.Add(new GroupMember { Track = t, Marker = m, BaseTime = t.SourceToTimeline(m.Sample), BaseOffset = t.Offset, HadPoints = t.Points.Count > 0 });
+            var pt = t.PointAt(m.Sample);
+            if (group.Count == 0 && pt != null)
+            {
+                // clicked an already-synced marker: adopt its whole group (every lane synced at that same time)
+                long time = t.SourceToTimeline(m.Sample);
+                long tol = Math.Max(2, sampleRate / 500);
+                foreach (var other in tracks)
+                {
+                    if (other == t) continue;
+                    foreach (var om in other.Markers)
+                    {
+                        var op = other.PointAt(om.Sample);
+                        if (op == null) continue;
+                        if (Math.Abs(other.SourceToTimeline(om.Sample) - time) <= tol)
+                        {
+                            group.Add(new GroupMember { Track = other, Marker = om, BaseTime = op.BaseTime >= 0 ? op.BaseTime : other.SourceToTimeline(om.Sample), BaseOffset = other.Offset, HadPoints = true });
+                            break;
+                        }
+                    }
+                }
+            }
+            long baseTime = pt != null && pt.BaseTime >= 0 ? pt.BaseTime : t.SourceToTimeline(m.Sample);
+            group.Add(new GroupMember { Track = t, Marker = m, BaseTime = baseTime, BaseOffset = t.Offset, HadPoints = t.Points.Count > 0 });
             ApplyGroup();
         }
 
@@ -669,29 +691,69 @@ namespace WavMarker.Sync
                     // first sync point on this lane: slide the clip, pin the marker
                     t.Offset = g.BaseOffset + (centre - g.BaseTime);
                     t.Points.Clear();
-                    t.AddOrUpdatePoint(g.Marker.Sample, g.Marker.Sample);
+                    t.AddOrUpdatePoint(g.Marker.Sample, g.Marker.Sample, g.BaseTime);
                 }
                 else
                 {
-                    t.AddOrUpdatePoint(g.Marker.Sample, centre - t.Offset);
+                    t.AddOrUpdatePoint(g.Marker.Sample, centre - t.Offset, g.BaseTime);
                 }
                 ScheduleRender(t);
             }
             groupCount = group.Count;
             RefreshOverlay(); RebuildHeaders(); UpdateScrollBar(); UpdateTime(); InvalidateNav();
             var spread = group.Count > 1 ? (group.Max(g => g.BaseTime) - group.Min(g => g.BaseTime)) / (double)sampleRate : 0;
-            SyncHint.Text = $"SYNC: {group.Count} lane(s) centred @ {FormatTime((double)centre / sampleRate)}   spread {spread * 1000:0} ms";
+            SyncHint.Text = $"SYNC: {group.Count} lane(s) centred @ {FormatTime((double)centre / sampleRate)}   spread {spread * 1000:0} ms" + (group.Count > 1 && group.All(g => g.HadPoints) ? "   (existing group re-opened)" : "");
         }
 
         // ---------------- undo / session ----------------
 
         class TrackState { public string Path { get; set; } public long Offset { get; set; } public bool Mute { get; set; } public bool Solo { get; set; } public List<long[]> Points { get; set; } = new(); }
-        class SessionState { public int SampleRate { get; set; } public string Mode { get; set; } public List<TrackState> Tracks { get; set; } = new(); }
+        class SessionState
+        {
+            public int SampleRate { get; set; } public string Mode { get; set; } public List<TrackState> Tracks { get; set; } = new();
+            // view state (only written to the session file, ignored by undo)
+            public double ViewStart { get; set; } public double ViewLen { get; set; } public long Playhead { get; set; }
+            public double VScroll { get; set; } public double LaneHeight { get; set; } public bool Follow { get; set; }
+            public double WinLeft { get; set; } public double WinTop { get; set; } public double WinWidth { get; set; } public double WinHeight { get; set; } public bool WinMaximized { get; set; }
+        }
+
+        SessionState CaptureFull()
+        {
+            var st = Capture();
+            st.ViewStart = viewStart; st.ViewLen = viewLen; st.Playhead = playhead; st.VScroll = vScroll; st.LaneHeight = laneHeight; st.Follow = followPlayhead;
+            var w = Window.GetWindow(this);
+            if (w != null)
+            {
+                var b = w.WindowState == WindowState.Normal ? new Rect(w.Left, w.Top, w.Width, w.Height) : w.RestoreBounds;
+                st.WinLeft = b.Left; st.WinTop = b.Top; st.WinWidth = b.Width; st.WinHeight = b.Height; st.WinMaximized = w.WindowState == WindowState.Maximized;
+            }
+            return st;
+        }
+
+        void ApplyView(SessionState st)
+        {
+            if (st.ViewLen > 0) { viewStart = st.ViewStart; viewLen = st.ViewLen; }
+            playhead = Math.Clamp(st.Playhead, 0, Math.Max(0, EndFrame));
+            vScroll = st.VScroll; laneHeight = st.LaneHeight; followPlayhead = st.Follow; FollowBtn.IsChecked = followPlayhead; FollowBtn.Content = followPlayhead ? "Scroll" : "Page";
+            var w = Window.GetWindow(this);
+            if (w != null && st.WinWidth > 200 && st.WinHeight > 150)
+            {
+                // only restore onto a position that is actually on a screen
+                var vs = new Rect(SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop, SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
+                if (vs.IntersectsWith(new Rect(st.WinLeft, st.WinTop, st.WinWidth, st.WinHeight)))
+                {
+                    w.WindowState = WindowState.Normal;
+                    w.Left = st.WinLeft; w.Top = st.WinTop; w.Width = st.WinWidth; w.Height = st.WinHeight;
+                    if (st.WinMaximized) w.WindowState = WindowState.Maximized;
+                }
+            }
+            ClampVScroll(); ViewChanged(); RefreshPlayhead(); UpdateTime(); RebuildHeaders();
+        }
 
         SessionState Capture() => new()
         {
             SampleRate = sampleRate, Mode = mode.ToString(),
-            Tracks = tracks.Select(t => new TrackState { Path = t.Path, Offset = t.Offset, Mute = t.Mute, Solo = t.Solo, Points = t.Points.Select(p => new[] { p.Source, p.Target }).ToList() }).ToList()
+            Tracks = tracks.Select(t => new TrackState { Path = t.Path, Offset = t.Offset, Mute = t.Mute, Solo = t.Solo, Points = t.Points.Select(p => new[] { p.Source, p.Target, p.BaseTime }).ToList() }).ToList()
         };
 
         void ApplyState(SessionState st)
@@ -701,7 +763,7 @@ namespace WavMarker.Sync
                 var t = tracks.FirstOrDefault(x => string.Equals(x.Path, ts.Path, StringComparison.OrdinalIgnoreCase));
                 if (t == null) continue;
                 t.Offset = ts.Offset; t.Mute = ts.Mute; t.Solo = ts.Solo;
-                t.Points = ts.Points.Select(p => new StretchPoint { Source = p[0], Target = p[1] }).OrderBy(p => p.Source).ToList();
+                t.Points = ts.Points.Select(p => new StretchPoint { Source = p[0], Target = p[1], BaseTime = p.Length > 2 ? p[2] : -1 }).OrderBy(p => p.Source).ToList();
                 t.RenderVersion++;
                 ScheduleRender(t);
             }
@@ -724,7 +786,7 @@ namespace WavMarker.Sync
                 if (dlg.ShowDialog() != true) return;
                 sessionPath = dlg.FileName;
             }
-            File.WriteAllText(sessionPath, JsonSerializer.Serialize(Capture(), new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(sessionPath, JsonSerializer.Serialize(CaptureFull(), new JsonSerializerOptions { WriteIndented = true }));
             SetDirty(false);
             SetStatus("Session saved: " + System.IO.Path.GetFileName(sessionPath));
         }
@@ -756,6 +818,8 @@ namespace WavMarker.Sync
             if (Enum.TryParse<StretchMode>(st.Mode, out var m)) { mode = m; ModeBox.SelectedIndex = Array.IndexOf(StretchEngine.Modes, mode); }
             await AddFiles(st.Tracks.Select(t => t.Path).Where(File.Exists).ToArray());
             ApplyState(st); loadingSession = false;
+            // window/view restore has to wait until layout has settled
+            Dispatcher.BeginInvoke(() => ApplyView(st), DispatcherPriority.Loaded);
             sessionPath = path; undo.Clear(); redo.Clear();
             SetDirty(false);
             SetStatus("Session loaded: " + System.IO.Path.GetFileName(path));
