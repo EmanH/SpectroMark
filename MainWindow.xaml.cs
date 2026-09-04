@@ -70,7 +70,7 @@ namespace WavMarker
         double viewStart, viewLen;
 
         // playback
-        WaveOutEvent waveOut;
+        readonly PlaybackEngine engine = new();
         BufferProvider provider;
         TempoProvider tempoProvider;
         double playTempo = 1.0;
@@ -669,44 +669,31 @@ namespace WavMarker
             if (playhead >= audio.Length - 1) playhead = 0;
             provider = new BufferProvider(audio) { Position = playhead };
             tempoProvider = new TempoProvider(provider, playTempo);
-            var w = new WaveOutEvent { DesiredLatency = 120, NumberOfBuffers = 3 };
-            w.Init(tempoProvider);
-            w.PlaybackStopped += (_, _) => Dispatcher.BeginInvoke(() =>
-            {
-                if (waveOut == w && playing) { StopPlayback(); playhead = audio.Length; PositionPlayheads(); UpdateTimeText(); }
-            });
-            waveOut = w;
             playStartSample = playhead;
-            w.Play();
+            engine.Start(tempoProvider);
             playing = true; timer.Start();
             PlayBtn.Content = "Pause  (Space)";
         }
 
         void StopPlayback()
         {
-            if (waveOut != null)
-            {
-                if (playing) playhead = CurrentPlaybackSample();
-                var w = waveOut; waveOut = null;
-                try { w.Stop(); w.Dispose(); } catch { }
-            }
+            if (playing) playhead = CurrentPlaybackSample();
+            engine.Stop();
             playing = false; timer.Stop();
             PlayBtn.Content = "Play  (Space)";
         }
 
         long CurrentPlaybackSample()
         {
-            if (!playing || waveOut == null || audio == null) return playhead;
-            long bytes;
-            try { bytes = waveOut.GetPosition(); } catch { return playhead; }
-            long frames = (long)(bytes / (4 * audio.ChannelCount) * playTempo);
-            return Math.Min(audio.Length, playStartSample + frames);
+            if (!playing || audio == null) return playhead;
+            return Math.Min(audio.Length, playStartSample + (long)(engine.FramesPlayed * playTempo));
         }
 
         void UpdatePlayhead()
         {
             if (!playing) return;
             playhead = CurrentPlaybackSample();
+            if (playhead >= audio.Length) { StopPlayback(); playhead = audio.Length; PositionPlayheads(); UpdateTimeText(); return; }
             if (!scrubbing && (playhead > viewStart + viewLen || playhead < viewStart))
             {
                 viewStart = playhead - viewLen * 0.05;

@@ -19,8 +19,10 @@ namespace WavMarker.Sync
         double viewStart, viewLen;     // timeline frames
         long playhead;
         bool playing;
-        WaveOutEvent waveOut;
+        readonly PlaybackEngine engine = new();
         long playStart;
+        double laneHeight = 0;         // 0 = fit all lanes; otherwise fixed height per lane
+        double vScroll = 0;
         readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(25) };
         StretchMode mode = StretchMode.Tonal;
 
@@ -53,16 +55,21 @@ namespace WavMarker.Sync
             ModeBox.ToolTip = string.Join("\n", StretchEngine.Modes.Select(StretchEngine.Describe));
             timer.Tick += (_, _) => UpdatePlayhead();
             renderTimer.Tick += (_, _) => { renderTimer.Stop(); if (lanesDirty) RenderLanes(); lanesDirty = false; };
-            LaneHost.SizeChanged += (_, _) => { InvalidateLanes(); RefreshOverlay(); RebuildHeaders(); };
+            LaneHost.SizeChanged += (_, _) => { ClampVScroll(); InvalidateLanes(); RefreshOverlay(); RefreshPlayhead(); RebuildHeaders(); };
             Ruler.SizeChanged += (_, _) => DrawRuler();
             Overlay.Draw = DrawOverlay; PlayheadLayer.Draw = DrawPlayhead;
+            engine.PlaybackEnded += () => Dispatcher.BeginInvoke(() => { if (playing && engine.IsPlaying == false) { } });
+            Headers.MouseWheel += Headers_MouseWheel;
             Loaded += (_, _) => { var src = PresentationSource.FromVisual(this); if (src?.CompositionTarget != null) dpiScale = src.CompositionTarget.TransformToDevice.M11; };
         }
 
         public int TrackCount => tracks.Count;
         long EndFrame => tracks.Count == 0 ? 0 : tracks.Max(t => t.End);
         double LaneW => LaneHost.ActualWidth;
-        double LaneH => tracks.Count == 0 ? LaneHost.ActualHeight : LaneHost.ActualHeight / tracks.Count;
+        double LaneH => tracks.Count == 0 ? LaneHost.ActualHeight : (laneHeight > 0 ? laneHeight : LaneHost.ActualHeight / tracks.Count);
+        double LaneTop(int i) => i * LaneH - vScroll;
+        int LaneAt(double y) { int i = (int)((y + vScroll) / LaneH); return i >= 0 && i < tracks.Count ? i : -1; }
+        void ClampVScroll() { double total = tracks.Count * LaneH; vScroll = Math.Clamp(vScroll, 0, Math.Max(0, total - LaneHost.ActualHeight)); }
         double SampleToX(double s) => (s - viewStart) / viewLen * LaneW;
         double XToSample(double x) => viewStart + x / LaneW * viewLen;
 
@@ -141,6 +148,7 @@ namespace WavMarker.Sync
         {
             Headers.Children.Clear();
             double h = LaneH;
+            Headers.Margin = new Thickness(0, -vScroll, 0, 0);
             for (int i = 0; i < tracks.Count; i++)
             {
                 var t = tracks[i];
@@ -174,14 +182,15 @@ namespace WavMarker.Sync
             int n = tracks.Count;
             if (n > 0 && viewLen > 0)
             {
-                int laneH = H / n;
+                int laneH = Math.Max(8, (int)(LaneH * dpiScale));
                 bool anySolo = tracks.Any(t => t.Solo);
                 for (int i = 0; i < n; i++)
                 {
                     var t = tracks[i];
-                    int top = i * laneH, center = top + laneH / 2;
+                    int top = (int)(LaneTop(i) * dpiScale), center = top + laneH / 2;
+                    if (top + laneH <= 0 || top >= H) continue;
                     int bg = i % 2 == 0 ? unchecked((int)0xFF101010) : unchecked((int)0xFF0C0C0C);
-                    for (int y = top; y < top + laneH; y++) for (int x = 0; x < W; x++) px[y * W + x] = bg;
+                    for (int y = Math.Max(0, top); y < Math.Min(H, top + laneH); y++) for (int x = 0; x < W; x++) px[y * W + x] = bg;
                     bool dim = t.Mute || (anySolo && !t.Solo);
                     var c = Palette[i % Palette.Length];
                     int col = dim ? unchecked((int)0xFF505050) : (255 << 24) | (c.R << 16) | (c.G << 8) | c.B;
@@ -193,12 +202,12 @@ namespace WavMarker.Sync
                         double tl0 = viewStart + (double)x / Wl * viewLen, tl1 = viewStart + (double)(x + 1) / Wl * viewLen;
                         long l0 = (long)(tl0 - t.Offset), l1 = Math.Max((long)(tl1 - t.Offset), (long)(tl0 - t.Offset) + 1);
                         if (l1 <= 0 || l0 >= t.RenderedLength) return;
-                        for (int y = top; y < top + laneH; y++) pxl[y * Wl + x] = clipBg;
+                        for (int y = Math.Max(0, top); y < Math.Min(H, top + laneH); y++) pxl[y * Wl + x] = clipBg;
                         t.Peak(Math.Max(0, l0), Math.Min(t.RenderedLength, l1), out float mn, out float mx);
                         int y0 = center - (int)(mx * amp), y1 = center - (int)(mn * amp);
-                        for (int y = Math.Max(top, y0); y <= Math.Min(top + laneH - 1, y1); y++) pxl[y * Wl + x] = col;
+                        for (int y = Math.Max(Math.Max(0, top), y0); y <= Math.Min(Math.Min(H - 1, top + laneH - 1), y1); y++) pxl[y * Wl + x] = col;
                     });
-                    for (int x = 0; x < W; x++) px[(top + laneH - 1) * W + x] = unchecked((int)0xFF303030);
+                    int sep = top + laneH - 1; if (sep >= 0 && sep < H) for (int x = 0; x < W; x++) px[sep * W + x] = unchecked((int)0xFF303030);
                 }
             }
             bmp.WritePixels(new Int32Rect(0, 0, W, H), px, W * 4, 0);
@@ -212,6 +221,9 @@ namespace WavMarker.Sync
         static readonly Brush BandHotBrush = Freeze(new SolidColorBrush(Color.FromArgb(110, 255, 255, 255)));
         static readonly Pen MarkerPen = Freeze(new Pen(MarkerBrush, 1.5));
         static readonly Pen SyncedPen = Freeze(new Pen(SyncedBrush, 2.5));
+        static readonly Brush HotBrush = Freeze(new SolidColorBrush(Color.FromRgb(255, 70, 70)));
+        static readonly Pen HotPen = Freeze(new Pen(HotBrush, 3));
+        static readonly Brush BandHotRed = Freeze(new SolidColorBrush(Color.FromArgb(70, 255, 70, 70)));
         static readonly Pen AnchorPen = Freeze(new Pen(Brushes.White, 2) { DashStyle = new DashStyle(new double[] { 4, 3 }, 0) });
         static readonly Pen PlayheadPen = Freeze(new Pen(Brushes.White, 1.5));
         const double HitPx = 12;
@@ -226,15 +238,16 @@ namespace WavMarker.Sync
             double h = LaneH, W = LaneW;
             for (int i = 0; i < tracks.Count; i++)
             {
-                var t = tracks[i]; double top = i * h;
+                var t = tracks[i]; double top = LaneTop(i);
+                if (top + h < 0 || top > LaneHost.ActualHeight) continue;
                 foreach (var m in t.Markers)
                 {
                     double x = SampleToX(t.SourceToTimeline(m.Sample));
                     if (x < -HitPx || x > W + HitPx) continue;
                     bool synced = t.PointAt(m.Sample) != null;
                     bool hot = hover.t == t && hover.m == m;
-                    if (sHeld || hot) dc.DrawRectangle(hot ? BandHotBrush : BandBrush, null, new Rect(x - HitPx, top, HitPx * 2, h));
-                    dc.DrawLine(synced ? SyncedPen : MarkerPen, new Point(x, top), new Point(x, top + h));
+                    if (sHeld || hot) dc.DrawRectangle(hot ? BandHotRed : BandBrush, null, new Rect(x - HitPx, top, HitPx * 2, h));
+                    dc.DrawLine(hot ? HotPen : synced ? SyncedPen : MarkerPen, new Point(x, top), new Point(x, top + h));
                     var g = new StreamGeometry();
                     using (var ctx = g.Open())
                     {
@@ -242,7 +255,7 @@ namespace WavMarker.Sync
                         else { ctx.BeginFigure(new Point(x, top), true, true); ctx.LineTo(new Point(x + 9, top), false, false); ctx.LineTo(new Point(x + 9, top + 7), false, false); ctx.LineTo(new Point(x, top + 11), false, false); }
                     }
                     g.Freeze();
-                    dc.DrawGeometry(synced ? SyncedBrush : MarkerBrush, null, g);
+                    dc.DrawGeometry(hot ? HotBrush : synced ? SyncedBrush : MarkerBrush, null, g);
                 }
             }
             if (anchorTrack != null)
@@ -328,36 +341,28 @@ namespace WavMarker.Sync
             if (tracks.Count == 0) return;
             if (playhead >= EndFrame - 1) playhead = 0;
             var prov = new SyncMixProvider(tracks, sampleRate, playhead, EndFrame);
-            var w = new WaveOutEvent { DesiredLatency = 120, NumberOfBuffers = 3 };
-            w.Init(prov);
-            w.PlaybackStopped += (_, _) => Dispatcher.BeginInvoke(() => { if (waveOut == w && playing) { StopPlayback(); playhead = EndFrame; RefreshPlayhead(); UpdateTime(); } });
-            waveOut = w; playStart = playhead; w.Play();
+            playStart = playhead;
+            engine.Start(prov);
             playing = true; timer.Start(); PlayBtn.Content = "Pause  (Space)";
         }
 
         public void StopPlayback()
         {
-            if (waveOut != null)
-            {
-                if (playing) playhead = CurrentSample();
-                var w = waveOut; waveOut = null;
-                try { w.Stop(); w.Dispose(); } catch { }
-            }
+            if (playing) playhead = CurrentSample();
+            engine.Stop();
             playing = false; timer.Stop(); PlayBtn.Content = "Play  (Space)";
         }
 
-        long CurrentSample()
-        {
-            if (!playing || waveOut == null) return playhead;
-            try { return Math.Min(EndFrame, playStart + waveOut.GetPosition() / 8); } catch { return playhead; }
-        }
+        long CurrentSample() => !playing ? playhead : Math.Min(EndFrame, playStart + engine.FramesPlayed);
 
         void UpdatePlayhead()
         {
             if (!playing) return;
             playhead = CurrentSample();
+            if (playhead >= EndFrame) { StopPlayback(); playhead = EndFrame; RefreshPlayhead(); UpdateTime(); return; }
             if (playhead > viewStart + viewLen || playhead < viewStart) { viewStart = playhead - viewLen * 0.05; ViewChanged(); }
             RefreshPlayhead(); UpdateTime();
+            if (engine.Underruns > 0 && !Status.Text.StartsWith("Audio underruns")) SetStatus($"Audio underruns: {engine.Underruns} ({engine.DeviceName})");
         }
 
         void SeekTo(long s)
@@ -400,7 +405,7 @@ namespace WavMarker.Sync
         (SyncTrack, Marker) HitMarker(Point p)
         {
             if (tracks.Count == 0) return (null, null);
-            int lane = (int)(p.Y / LaneH); if (lane < 0 || lane >= tracks.Count) return (null, null);
+            int lane = LaneAt(p.Y); if (lane < 0) return (null, null);
             var t = tracks[lane]; Marker best = null; double bd = HitPx;
             foreach (var m in t.Markers) { double d = Math.Abs(SampleToX(t.SourceToTimeline(m.Sample)) - p.X); if (d < bd) { bd = d; best = m; } }
             return best == null ? (null, null) : (t, best);
@@ -421,7 +426,7 @@ namespace WavMarker.Sync
                     if (pt != null) { PushUndo(); t.RemovePoint(pt); ScheduleRender(t); RefreshOverlay(); RebuildHeaders(); SetStatus($"Removed sync point on {t.Name}"); }
                     return;
                 }
-                int lane = (int)(p.Y / LaneH);
+                int lane = LaneAt(p.Y); if (lane < 0) return;
                 pressed = true; pressLane = lane; pressX = p.X; pressOffset = tracks[lane].Offset; draggingClip = false;
                 LaneHost.CaptureMouse();
             }
@@ -467,9 +472,32 @@ namespace WavMarker.Sync
         {
             if (tracks.Count == 0) return;
             var p = e.GetPosition(LaneHost);
-            if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) || Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) { viewStart -= Math.Sign(e.Delta) * viewLen * 0.15; ViewChanged(); }
+            if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) { AdjustLaneHeight(e.Delta > 0 ? 1.2 : 1 / 1.2, p.Y); }
+            else if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) { viewStart -= Math.Sign(e.Delta) * viewLen * 0.15; ViewChanged(); }
             else ZoomAt(p.X, e.Delta > 0 ? 1.3 : 1 / 1.3);
             e.Handled = true;
+        }
+
+        // wheel over the track headers: scroll lanes vertically; Ctrl+wheel: lane height (like Reaper)
+        void Headers_MouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (tracks.Count == 0) return;
+            if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) AdjustLaneHeight(e.Delta > 0 ? 1.2 : 1 / 1.2, LaneHost.ActualHeight / 2);
+            else { vScroll -= Math.Sign(e.Delta) * LaneH * 0.5; ClampVScroll(); InvalidateLanes(); RefreshOverlay(); RefreshPlayhead(); RebuildHeaders(); }
+            e.Handled = true;
+        }
+
+        void AdjustLaneHeight(double factor, double anchorY)
+        {
+            double old = LaneH;
+            double fit = LaneHost.ActualHeight / Math.Max(1, tracks.Count);
+            double nh = Math.Clamp(old * factor, 36, 600);
+            if (Math.Abs(nh - fit) < 4) nh = fit;
+            laneHeight = nh == fit ? 0 : nh;
+            // keep the lane under the cursor in place
+            vScroll = (anchorY + vScroll) * (LaneH / old) - anchorY;
+            ClampVScroll();
+            InvalidateLanes(); RefreshOverlay(); RefreshPlayhead(); RebuildHeaders();
         }
 
         // ---------------- sync logic ----------------
@@ -495,6 +523,8 @@ namespace WavMarker.Sync
                 string err = t.CheckPoint(m.Sample, localTarget);
                 if (err != null) { undo.Pop(); SetStatus($"Cannot sync: {err}"); return; }
                 t.AddOrUpdatePoint(m.Sample, localTarget);
+                var prev = t.Points.Where(p => p.Source < m.Sample).LastOrDefault();
+                if (prev != null) SetStatus($"{t.Name}: stretched {(double)(localTarget - prev.Target) / Math.Max(1, m.Sample - prev.Source):0.000}x between sync points");
             }
             groupCount++;
             ScheduleRender(t);

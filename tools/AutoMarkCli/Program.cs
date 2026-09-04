@@ -70,6 +70,34 @@ switch (args[0])
         }
         return 0;
     }
+    case "mixtest":  // mixtest <wav> : run the sync mixer over one clip (identity) and compare with the source
+    {
+        var a = AudioIO.Read(args[1]);
+        var t = new WavMarker.Sync.SyncTrack { Path = args[1], Audio = a }; t.Init();
+        var mix = new WavMarker.Sync.SyncMixProvider(new List<WavMarker.Sync.SyncTrack> { t }, a.SampleRate, 0, t.End);
+        var buf = new float[5292 * 2]; long pos = 0; double maxErr = 0; int n;
+        while ((n = mix.Read(buf, 0, buf.Length)) > 0)
+        {
+            int frames = n / 2;
+            for (int i = 0; i < frames; i++)
+            {
+                float l = a.Channels[0][pos + i], r = a.Channels[Math.Min(1, a.ChannelCount - 1)][pos + i];
+                maxErr = Math.Max(maxErr, Math.Max(Math.Abs(buf[i * 2] - l), Math.Abs(buf[i * 2 + 1] - r)));
+            }
+            pos += frames;
+        }
+        Console.WriteLine($"frames read {pos} of {a.Length}, max abs error vs source {maxErr}");
+        // now with a sync point: stretch 2..5 s to 2..5.3 s and check continuity
+        t.AddOrUpdatePoint(a.SampleRate * 2, a.SampleRate * 2);
+        t.AddOrUpdatePoint(a.SampleRate * 5, (long)(a.SampleRate * 5.3));
+        t.Render(WavMarker.Sync.StretchMode.Tonal, t.RenderVersion);
+        Console.WriteLine($"segments: {string.Join(" | ", t.Segments.Select(sg => $"src {sg.SrcStart}-{sg.SrcEnd} -> local {sg.LocalStart}+{sg.LocalLen} {(sg.Identity ? "identity" : "stretched")}"))}");
+        mix = new WavMarker.Sync.SyncMixProvider(new List<WavMarker.Sync.SyncTrack> { t }, a.SampleRate, 0, t.End);
+        pos = 0; double e = 0; long cnt = 0;
+        while ((n = mix.Read(buf, 0, buf.Length)) > 0) { for (int i = 0; i < n; i += 2) { e += buf[i] * buf[i]; cnt++; } pos += n / 2; }
+        Console.WriteLine($"stretched: frames read {pos} of {t.End}, rms {Math.Sqrt(e / cnt):0.0000}");
+        return 0;
+    }
     case "list":
     {
         foreach (var f in args.Skip(1))

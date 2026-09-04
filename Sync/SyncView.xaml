@@ -19,7 +19,7 @@
         </Border>
         <Border DockPanel.Dock="Bottom" Background="#1e1e1e" Padding="10,3" BorderBrush="#333" BorderThickness="0,1,0,0">
             <TextBlock FontSize="11" Foreground="#888"
-                       Text="Hold S and click markers on different lanes to snap them together (first click = anchor)   Alt+click a synced marker: remove that sync point   Drag a lane: move clip   Click: seek   Space: play   Wheel: zoom   Shift+Wheel: pan   Ctrl+Z / Ctrl+Shift+Z: undo / redo"/>
+                       Text="Hold S and click markers on different lanes to snap them together (first click = anchor)   Alt+click a synced marker: remove that sync point   Drag a lane: move clip   Click: seek   Space: play   Wheel: zoom   Shift+Wheel: pan   Ctrl+Wheel: lane height   Wheel over headers: scroll lanes   Ctrl+Z / Ctrl+Shift+Z: undo / redo"/>
         </Border>
         <Grid>
             <Grid.ColumnDefinitions>
@@ -33,7 +33,9 @@
             </Grid.RowDefinitions>
             <Border Grid.Row="0" Grid.Column="0" Background="#1a1a1a"/>
             <Canvas Grid.Row="0" Grid.Column="1" x:Name="Ruler" Background="#1a1a1a" ClipToBounds="True"/>
-            <StackPanel Grid.Row="1" Grid.Column="0" x:Name="Headers" Background="#1a1a1a"/>
+            <Border Grid.Row="1" Grid.Column="0" Background="#1a1a1a" ClipToBounds="True">
+                <StackPanel x:Name="Headers" VerticalAlignment="Top"/>
+            </Border>
             <Grid Grid.Row="1" Grid.Column="1" x:Name="LaneHost" Background="#0c0c0c" ClipToBounds="True"
                   MouseDown="Lane_MouseDown" MouseMove="Lane_MouseMove" MouseUp="Lane_MouseUp" MouseWheel="Lane_MouseWheel" MouseLeave="Lane_MouseLeave">
                 <Image x:Name="LaneImage" Stretch="Fill"/>

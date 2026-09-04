@@ -29,6 +29,7 @@ namespace WavMarker.Sync
         public long Offset;                         // timeline frame where local 0 sits
         public List<StretchPoint> Points = new();   // sorted by Source; the first is always a pin (Source == Target)
         public bool Mute, Solo;
+        public float Gain = 1f;                     // normalisation gain (peak -> -1 dBFS)
 
         public List<Segment> Segments = new();
         public long RenderedLength;
@@ -46,6 +47,10 @@ namespace WavMarker.Sync
         public void Init()
         {
             (SrcPeakMin, SrcPeakMax) = BuildPeaks(Audio.Channels, Audio.Length);
+            float peak = 0;
+            for (int c = 0; c < Audio.ChannelCount; c++) foreach (var v in SrcPeakMax[c]) if (v > peak) peak = v;
+            for (int c = 0; c < Audio.ChannelCount; c++) foreach (var v in SrcPeakMin[c]) if (-v > peak) peak = -v;
+            Gain = peak > 1e-5f ? 0.891f / peak : 1f;
             RenderedLength = Audio.Length;
             Segments = new List<Segment> { new Segment { SrcStart = 0, SrcEnd = Audio.Length, LocalStart = 0, LocalLen = Audio.Length } };
             RenderedVersion = RenderVersion;
@@ -114,11 +119,11 @@ namespace WavMarker.Sync
                 if (p.Source < source && p.Target >= localTarget) return "would fold time backwards over an earlier sync point";
                 if (p.Source > source && p.Target <= localTarget) return "would fold time backwards over a later sync point";
             }
-            const double ratioLimit = 4.0;
+            const double ratioLimit = 1.35;   // real take drift is a few percent; beyond this it is a wrong click and would sound like stutter
             var prev = Points.Where(p => p.Source < source).OrderBy(p => p.Source).LastOrDefault();
             var next = Points.Where(p => p.Source > source).OrderBy(p => p.Source).FirstOrDefault();
-            if (prev != null) { double r = (double)(localTarget - prev.Target) / Math.Max(1, source - prev.Source); if (r > ratioLimit || r < 1 / ratioLimit) return $"stretch ratio {r:0.00} too extreme"; }
-            if (next != null) { double r = (double)(next.Target - localTarget) / Math.Max(1, next.Source - source); if (r > ratioLimit || r < 1 / ratioLimit) return $"stretch ratio {r:0.00} too extreme"; }
+            if (prev != null) { double r = (double)(localTarget - prev.Target) / Math.Max(1, source - prev.Source); if (r > ratioLimit || r < 1 / ratioLimit) return $"stretch ratio {r:0.00}x is too extreme (limit {ratioLimit:0.00}x): probably not the same syllable"; }
+            if (next != null) { double r = (double)(next.Target - localTarget) / Math.Max(1, next.Source - source); if (r > ratioLimit || r < 1 / ratioLimit) return $"stretch ratio {r:0.00}x is too extreme (limit {ratioLimit:0.00}x): probably not the same syllable"; }
             return null;
         }
 
@@ -172,6 +177,18 @@ namespace WavMarker.Sync
                 if (seg == null)
                 {
                     var buf = StretchEngine.RenderSegment(a, s0, s1, tl, mode);
+                    // crossfade the segment edges into the unstretched neighbours so joins are continuous
+                    int xf = (int)Math.Min(a.SampleRate / 100, tl / 4);   // 10 ms
+                    for (int c = 0; c < buf.Length; c++)
+                    {
+                        var src = a.Channels[c];
+                        for (int k = 0; k < xf; k++)
+                        {
+                            float w = (k + 0.5f) / xf;
+                            long si = s0 + k; if (si < a.Length) buf[c][k] = src[si] * (1 - w) + buf[c][k] * w;
+                            long ei = s1 - xf + k; long bi = tl - xf + k; if (ei >= 0 && bi >= 0) buf[c][bi] = buf[c][bi] * (1 - w) + src[ei] * w;
+                        }
+                    }
                     var (pmin, pmax) = BuildPeaks(buf, tl);
                     seg = new Segment { SrcStart = s0, SrcEnd = s1, LocalLen = tl, Buf = buf, PeakMin = pmin, PeakMax = pmax };
                     lock (segCache) segCache[key] = seg;
@@ -197,14 +214,14 @@ namespace WavMarker.Sync
                 long from = Math.Max(local0, s.LocalStart), to = Math.Min(end, segEnd);
                 if (s.Identity)
                 {
-                    long srcIdx = s.SrcStart + (from - s.LocalStart);
-                    for (long i = from; i < to; i++, srcIdx++) dst[dstOff + (int)(i - local0) * dstStride] += src[srcIdx];
+                    long srcIdx = s.SrcStart + (from - s.LocalStart); float g = Gain;
+                    for (long i = from; i < to; i++, srcIdx++) dst[dstOff + (int)(i - local0) * dstStride] += src[srcIdx] * g;
                 }
                 else
                 {
                     var b = s.Buf[Math.Min(ch, s.Buf.Length - 1)];
-                    long bi = from - s.LocalStart;
-                    for (long i = from; i < to; i++, bi++) dst[dstOff + (int)(i - local0) * dstStride] += b[bi];
+                    long bi = from - s.LocalStart; float g = Gain;
+                    for (long i = from; i < to; i++, bi++) dst[dstOff + (int)(i - local0) * dstStride] += b[bi] * g;
                 }
             }
         }
@@ -238,6 +255,7 @@ namespace WavMarker.Sync
                     for (long k = Math.Max(0, b0); k <= hi; k++) { if (a[k] < mn) mn = a[k]; if (b[k] > mx) mx = b[k]; }
                 }
             }
+            mn *= Gain; mx *= Gain;
         }
     }
 }

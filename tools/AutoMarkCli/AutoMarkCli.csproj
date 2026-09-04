@@ -12,6 +12,7 @@
     <Compile Include="../../WavCues.cs" />
     <Compile Include="../../Sync/StretchEngine.cs" />
     <Compile Include="../../Sync/SyncTrack.cs" />
+    <Compile Include="../../Sync/SyncMixProvider.cs" />
     <PackageReference Include="SoundTouch.Net" Version="2.3.2" />
     <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>
