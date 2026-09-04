@@ -412,7 +412,7 @@ namespace WavMarker
             var s = spec; int nch = s.Data.Length;
             int bandH = H / nch;
             bool logF = LogFreqChk.IsChecked == true;
-            double nyq = audio.SampleRate / 2.0, fmin = 20;
+            double nyq = audio.SampleRate / 2.0;
             double floorDb = FloorSlider.Value;
             int floorByte = (int)Math.Max(0, 255 + floorDb * 2);
             var gain = new int[256];
@@ -430,7 +430,7 @@ namespace WavMarker
             for (int y = 0; y <= bandH; y++)
             {
                 double frac = 1.0 - (double)y / bandH;
-                double freq = logF ? fmin * Math.Pow(nyq / fmin, frac) : frac * nyq;
+                double freq = FreqScale.ToFreq(frac, nyq, logF);
                 by[y] = Math.Clamp((int)(freq / nyq * s.Bins), 0, s.Bins - 1);
             }
             int bins = s.Bins;
@@ -547,8 +547,8 @@ namespace WavMarker
                 {
                     for (double dec = 10; dec < nyq; dec *= 10)
                     {
-                        cand.Add((dec, true));
-                        foreach (int k in new[] { 2, 3, 4, 5, 6, 7 }) if (dec * k < nyq) cand.Add((dec * k, false));
+                        if (dec >= 300) cand.Add((dec, true));
+                        foreach (int k in new[] { 2, 3, 4, 5, 6, 7 }) if (dec * k < nyq && dec * k >= 300) cand.Add((dec * k, false));
                         if (dec == 1000 && 15000 < nyq) cand.Add((15000, false));
                     }
                 }
@@ -558,7 +558,7 @@ namespace WavMarker
                     for (double f = stepHz; f < nyq; f += stepHz) cand.Add((f, f % 10000 == 0));
                 }
                 cand.Sort((a, b) => b.f.CompareTo(a.f));
-                double Frac(double f) => logF ? Math.Log(f / 20.0) / Math.Log(nyq / 20.0) : f / nyq;
+                double Frac(double f) => FreqScale.ToFrac(f, nyq, logF);
                 for (int c = 0; c < nch; c++)
                 {
                     double lastLabelY = double.NegativeInfinity;
@@ -952,7 +952,7 @@ namespace WavMarker
             double secs = XToSample(p.X) / audio.SampleRate;
             int nch = audio.ChannelCount; double bandH = SpecHost.ActualHeight / nch;
             double frac = 1 - (p.Y % bandH) / bandH; double nyq = audio.SampleRate / 2.0;
-            double freq = LogFreqChk.IsChecked == true ? 20 * Math.Pow(nyq / 20, frac) : frac * nyq;
+            double freq = FreqScale.ToFreq(frac, nyq, LogFreqChk.IsChecked == true);
             hoverText.Text = $"{FormatTime(secs)}   {freq:0} Hz";
             hoverText.Visibility = Visibility.Visible;
             Canvas.SetLeft(hoverText, Math.Min(p.X + 14, SpecW - 130)); Canvas.SetTop(hoverText, Math.Max(0, p.Y - 22));
