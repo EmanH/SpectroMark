@@ -1,9 +1,10 @@
 <Window x:Class="WavMarker.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:sync="clr-namespace:WavMarker.Sync"
         Title="SpectroMark" Icon="assets/SpectroMark.ico" Width="1500" Height="860" MinWidth="900" MinHeight="500"
         Background="#141414" WindowStartupLocation="CenterScreen"
-        PreviewKeyDown="Window_PreviewKeyDown" AllowDrop="True" Drop="Window_Drop">
+        PreviewKeyDown="Window_PreviewKeyDown" PreviewKeyUp="Window_PreviewKeyUp" AllowDrop="True" Drop="Window_Drop">
     <Window.Resources>
         <Style TargetType="Button">
             <Setter Property="Padding" Value="12,4"/>
@@ -24,6 +25,13 @@
             <DockPanel>
                 <TextBlock x:Name="TimeText" DockPanel.Dock="Right" FontFamily="Consolas" FontSize="26" Foreground="#FFEB3B" Text="0:00.000 / 0:00.000" Margin="16,0,0,0"/>
                 <StackPanel Orientation="Horizontal">
+                    <Border BorderBrush="#444" BorderThickness="1" CornerRadius="3" Margin="0,0,14,0">
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton x:Name="MarkerModeBtn" Content="Markers" IsChecked="True" Style="{StaticResource {x:Type ToggleButton}}" Padding="10,3" Background="#2d2d2d" Foreground="#eee" BorderThickness="0" Focusable="False" Checked="Mode_Checked"/>
+                            <RadioButton x:Name="SyncModeBtn" Content="Sync" Style="{StaticResource {x:Type ToggleButton}}" Padding="10,3" Background="#2d2d2d" Foreground="#eee" BorderThickness="0" Focusable="False" Checked="Mode_Checked"/>
+                        </StackPanel>
+                    </Border>
+                    <StackPanel Orientation="Horizontal" x:Name="MarkerTools">
                     <Button Content="Open WAV(s)..." Click="Open_Click"/>
                     <Button x:Name="PlayBtn" Content="Play  (Space)" Click="Play_Click" Width="120"/>
                     <Button Content="Drop Marker  (M)" Click="Marker_Click" Background="#3a3a10" Foreground="#FFEB3B"/>
@@ -38,6 +46,7 @@
                     <TextBlock Text="Floor dB" Margin="8,0,4,0"/>
                     <Slider x:Name="FloorSlider" Minimum="-130" Maximum="-40" Value="-100" Width="120" VerticalAlignment="Center" ValueChanged="Spec_SettingChanged"/>
                     <TextBlock x:Name="InfoText" Margin="20,0,0,0" Text="Open a WAV file (or drag one in)"/>
+                    </StackPanel>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -47,6 +56,7 @@
                        Text="Ctrl+Z / Ctrl+Shift+Z: undo / redo   Ctrl+S: save markers into WAV   Space: play/pause   M: drop marker   Home: to start   ←/→: nudge 1s   Delete: remove selected marker   |   Left-click/drag: scrub   Wheel: zoom   Shift+Wheel: pan   Middle-drag: pan   |   Drag a marker to move it"/>
         </Border>
         <Grid>
+        <Grid x:Name="MarkerRoot">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="230" MinWidth="120"/>
                 <ColumnDefinition Width="5"/>
@@ -98,6 +108,8 @@
                 <ListBox x:Name="MarkerList" Background="#111" Foreground="#eee" BorderThickness="0" FontFamily="Consolas" FontSize="14"
                          SelectionChanged="MarkerList_SelectionChanged" MouseDoubleClick="MarkerList_DoubleClick"/>
             </DockPanel>
+        </Grid>
+        <sync:SyncView x:Name="SyncPane" Visibility="Collapsed"/>
         </Grid>
     </DockPanel>
 </Window>

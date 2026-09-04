@@ -113,6 +113,8 @@ namespace WavMarker
                 var src = PresentationSource.FromVisual(this);
                 if (src?.CompositionTarget != null) dpiScale = src.CompositionTarget.TransformToDevice.M11;
                 FileList.ItemsSource = files;
+                SyncPane.TimeDisplay = TimeText;
+                SyncPane.StatusChanged += msg => { if (syncMode) InfoText.Text = msg; };
                 var args = Environment.GetCommandLineArgs().Skip(1).Where(File.Exists).ToArray();
                 if (args.Length > 0) AddFiles(args);
             };
@@ -137,10 +139,36 @@ namespace WavMarker
             await Task.CompletedTask;
         }
 
+        bool syncMode;
+
+        void Mode_Checked(object sender, RoutedEventArgs e)
+        {
+            if (SyncPane == null) return;
+            bool sync = SyncModeBtn.IsChecked == true;
+            if (sync == syncMode) return;
+            syncMode = sync;
+            if (sync) { StopPlayback(); MarkerRoot.Visibility = Visibility.Collapsed; SyncPane.Visibility = Visibility.Visible; MarkerTools.Visibility = Visibility.Collapsed; SyncPane.Focus(); InfoText.Text = ""; }
+            else { SyncPane.StopPlayback(); SyncPane.Visibility = Visibility.Collapsed; MarkerRoot.Visibility = Visibility.Visible; MarkerTools.Visibility = Visibility.Visible; UpdateTimeText(); UpdateDirtyIndicator(); }
+        }
+
+        void Window_PreviewKeyUp(object sender, KeyEventArgs e)
+        {
+            if (syncMode && SyncPane.HandleKey(e, false)) e.Handled = true;
+        }
+
         void Window_Drop(object sender, DragEventArgs e)
         {
             if (e.Data.GetData(DataFormats.FileDrop) is string[] dropped && dropped.Length > 0)
-                AddFiles(dropped.SelectMany(p => Directory.Exists(p) ? Directory.EnumerateFiles(p, "*.wav") : new[] { p }).ToArray());
+            {
+                var expanded = dropped.SelectMany(p => Directory.Exists(p) ? Directory.EnumerateFiles(p, "*.wav") : new[] { p }).ToArray();
+                if (syncMode)
+                {
+                    var session = expanded.FirstOrDefault(f => f.EndsWith(".spectrosync.json", StringComparison.OrdinalIgnoreCase));
+                    if (session != null) _ = SyncPane.LoadSession(session); else _ = SyncPane.AddFiles(expanded);
+                    return;
+                }
+                AddFiles(expanded);
+            }
         }
 
         void AddFiles(string[] paths)
@@ -853,6 +881,7 @@ namespace WavMarker
 
         void Window_PreviewKeyDown(object sender, KeyEventArgs e)
         {
+            if (syncMode) { if (SyncPane.HandleKey(e, true)) e.Handled = true; return; }
             if (audio == null) return;
             bool shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
             switch (e.Key)

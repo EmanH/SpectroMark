@@ -53,6 +53,23 @@ switch (args[0])
         Console.WriteLine($"TOTAL hit={tp} extra={fp} missed={fn}  precision={p:0.00} recall={r:0.00} F1={(2 * p * r / Math.Max(1e-9, p + r)):0.00}");
         return 0;
     }
+    case "stretchtest":  // stretchtest <wav>  : stretch a 3 s piece by several ratios, report length/energy/timing
+    {
+        var a = AudioIO.Read(args[1]);
+        long s0 = a.SampleRate * 2, s1 = s0 + a.SampleRate * 3;
+        foreach (var ratio in new[] { 1.0, 0.97, 1.03, 0.9, 1.1, 1.5 })
+        {
+            long target = (long)((s1 - s0) * ratio);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var seg = WavMarker.Sync.StretchEngine.RenderSegment(a, s0, s1, target, WavMarker.Sync.StretchMode.Tonal);
+            sw.Stop();
+            double eIn = 0; for (long i = s0; i < s1; i++) eIn += a.Channels[0][i] * a.Channels[0][i]; eIn /= (s1 - s0);
+            double eOut = 0; int zerosTail = 0; for (long i = 0; i < target; i++) eOut += seg[0][i] * seg[0][i]; eOut /= target;
+            for (long i = target - 1; i >= 0 && seg[0][i] == 0; i--) zerosTail++;
+            Console.WriteLine($"ratio {ratio:0.00}: out len {seg[0].Length} (want {target})  rmsIn {Math.Sqrt(eIn):0.0000} rmsOut {Math.Sqrt(eOut):0.0000}  trailing zeros {zerosTail}  {sw.ElapsedMilliseconds} ms");
+        }
+        return 0;
+    }
     case "list":
     {
         foreach (var f in args.Skip(1))
