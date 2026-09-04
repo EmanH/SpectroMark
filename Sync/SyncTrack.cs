@@ -1,5 +1,3 @@
-using System.IO;
-
 namespace WavMarker.Sync
 {
     /// <summary>A stretch marker: source frame in the clip maps to a local (pre-offset) timeline frame.</summary>
@@ -7,6 +5,19 @@ namespace WavMarker.Sync
     {
         public long Source;
         public long Target;
+    }
+
+    /// <summary>
+    /// One piece of the stretched timeline. Identity segments read straight from the source audio
+    /// (no copy); stretched segments own a small rendered buffer with its own peak pyramid.
+    /// </summary>
+    public class Segment
+    {
+        public long SrcStart, SrcEnd;
+        public long LocalStart, LocalLen;
+        public float[][] Buf;            // null = identity (read from source at SrcStart + (local - LocalStart))
+        public float[][] PeakMin, PeakMax;
+        public bool Identity => Buf == null;
     }
 
     public class SyncTrack
@@ -19,20 +30,45 @@ namespace WavMarker.Sync
         public List<StretchPoint> Points = new();   // sorted by Source; the first is always a pin (Source == Target)
         public bool Mute, Solo;
 
-        // rendered (stretched) audio in local time
-        public float[][] Rendered;
+        public List<Segment> Segments = new();
         public long RenderedLength;
-        public int RenderVersion;                   // bumps on every model change
+        public int RenderVersion;
         public int RenderedVersion = -1;
         public bool Rendering;
 
-        // peak pyramid of the rendered audio (per channel, per 256-frame block: min,max)
         public const int PeakBlock = 256;
-        public float[][] PeakMin, PeakMax;
+        public float[][] SrcPeakMin, SrcPeakMax;    // peak pyramid of the source, computed once
 
-        readonly Dictionary<string, float[][]> segCache = new();
+        readonly Dictionary<string, Segment> segCache = new();
 
         public long End => Offset + RenderedLength;
+
+        public void Init()
+        {
+            (SrcPeakMin, SrcPeakMax) = BuildPeaks(Audio.Channels, Audio.Length);
+            RenderedLength = Audio.Length;
+            Segments = new List<Segment> { new Segment { SrcStart = 0, SrcEnd = Audio.Length, LocalStart = 0, LocalLen = Audio.Length } };
+            RenderedVersion = RenderVersion;
+        }
+
+        static (float[][], float[][]) BuildPeaks(float[][] chans, long len)
+        {
+            int ch = chans.Length; int blocks = (int)((len + PeakBlock - 1) / PeakBlock);
+            var pmin = new float[ch][]; var pmax = new float[ch][];
+            for (int c = 0; c < ch; c++)
+            {
+                var mn = new float[blocks]; var mx = new float[blocks]; var src = chans[c];
+                Parallel.For(0, blocks, b =>
+                {
+                    long i0 = (long)b * PeakBlock, i1 = Math.Min(len, i0 + PeakBlock);
+                    float lo = 0, hi = 0;
+                    for (long i = i0; i < i1; i++) { float v = src[i]; if (v < lo) lo = v; if (v > hi) hi = v; }
+                    mn[b] = lo; mx[b] = hi;
+                });
+                pmin[c] = mn; pmax[c] = mx;
+            }
+            return (pmin, pmax);
+        }
 
         // ---------- mapping ----------
         public long SourceToLocal(long src)
@@ -70,7 +106,6 @@ namespace WavMarker.Sync
 
         public StretchPoint PointAt(long source) => Points.FirstOrDefault(p => p.Source == source);
 
-        /// <summary>Can a point (source -> localTarget) be inserted keeping time monotonic? Returns null if ok, else reason.</summary>
         public string CheckPoint(long source, long localTarget)
         {
             foreach (var p in Points)
@@ -79,7 +114,7 @@ namespace WavMarker.Sync
                 if (p.Source < source && p.Target >= localTarget) return "would fold time backwards over an earlier sync point";
                 if (p.Source > source && p.Target <= localTarget) return "would fold time backwards over a later sync point";
             }
-            double ratioLimit = 4.0;
+            const double ratioLimit = 4.0;
             var prev = Points.Where(p => p.Source < source).OrderBy(p => p.Source).LastOrDefault();
             var next = Points.Where(p => p.Source > source).OrderBy(p => p.Source).FirstOrDefault();
             if (prev != null) { double r = (double)(localTarget - prev.Target) / Math.Max(1, source - prev.Source); if (r > ratioLimit || r < 1 / ratioLimit) return $"stretch ratio {r:0.00} too extreme"; }
@@ -104,7 +139,6 @@ namespace WavMarker.Sync
             RenderVersion++;
         }
 
-        /// <summary>Keep the invariant: the first point is a pin (no stretch before it), absorbing any shift into Offset.</summary>
         void NormaliseFirstPin()
         {
             if (Points.Count == 0) return;
@@ -115,75 +149,95 @@ namespace WavMarker.Sync
             foreach (var p in Points) p.Target -= shift;
         }
 
-        // ---------- rendering ----------
-        public long ComputeRenderedLength() => SourceToLocal(Audio.Length);
-
-        /// <summary>Full render from segment cache. Safe to call on a worker thread; swaps buffers at the end.</summary>
+        // ---------- rendering (only stretched segments are ever rendered) ----------
         public void Render(StretchMode mode, int version)
         {
-            var a = Audio; int ch = a.ChannelCount;
-            long total = ComputeRenderedLength();
-            var outp = new float[ch][];
-            for (int c = 0; c < ch; c++) outp[c] = new float[total];
-
-            // segment boundaries in source: 0, points..., length
-            var bounds = new List<(long s, long t)> { (0, SourceToLocal(0)) };
+            var a = Audio;
+            var bounds = new List<(long s, long t)> { (0, 0) };
             foreach (var p in Points) if (p.Source > 0 && p.Source < a.Length) bounds.Add((p.Source, p.Target));
+            long total = SourceToLocal(a.Length);
             bounds.Add((a.Length, total));
 
+            var segs = new List<Segment>();
             var keep = new HashSet<string>();
             for (int i = 0; i < bounds.Count - 1; i++)
             {
                 var (s0, t0) = bounds[i]; var (s1, t1) = bounds[i + 1];
                 long tl = t1 - t0; if (tl <= 0 || s1 <= s0) continue;
+                if (tl == s1 - s0) { segs.Add(new Segment { SrcStart = s0, SrcEnd = s1, LocalStart = t0, LocalLen = tl }); continue; }
                 string key = $"{s0}:{s1}:{tl}:{mode}";
                 keep.Add(key);
-                float[][] seg;
+                Segment seg;
                 lock (segCache) segCache.TryGetValue(key, out seg);
                 if (seg == null)
                 {
-                    seg = StretchEngine.RenderSegment(a, s0, s1, tl, mode);
+                    var buf = StretchEngine.RenderSegment(a, s0, s1, tl, mode);
+                    var (pmin, pmax) = BuildPeaks(buf, tl);
+                    seg = new Segment { SrcStart = s0, SrcEnd = s1, LocalLen = tl, Buf = buf, PeakMin = pmin, PeakMax = pmax };
                     lock (segCache) segCache[key] = seg;
                 }
-                for (int c = 0; c < ch; c++) Array.Copy(seg[c], 0, outp[c], t0, Math.Min(tl, seg[c].Length));
-                // short crossfade across the join to hide any phase discontinuity
-                if (i > 0)
-                {
-                    int xf = (int)Math.Min(a.SampleRate / 200, Math.Min(tl, t0)); // 5 ms
-                    for (int c = 0; c < ch; c++)
-                        for (int k = 0; k < xf; k++)
-                        {
-                            double w = (k + 1.0) / (xf + 1);
-                            long idx = t0 - xf / 2 + k;
-                            if (idx <= 0 || idx >= total) continue;
-                            // blend what is already there (previous segment tail) with this segment's start region
-                            float prevV = outp[c][idx];
-                            long segIdx = idx - t0;
-                            float curV = segIdx >= 0 && segIdx < seg[c].Length ? seg[c][segIdx] : prevV;
-                            outp[c][idx] = (float)(prevV * (1 - w) + curV * w);
-                        }
-                }
+                segs.Add(new Segment { SrcStart = s0, SrcEnd = s1, LocalStart = t0, LocalLen = tl, Buf = seg.Buf, PeakMin = seg.PeakMin, PeakMax = seg.PeakMax });
             }
             lock (segCache) foreach (var k in segCache.Keys.Where(k => !keep.Contains(k)).ToList()) segCache.Remove(k);
-
-            // peaks
-            int blocks = (int)((total + PeakBlock - 1) / PeakBlock);
-            var pmin = new float[ch][]; var pmax = new float[ch][];
-            for (int c = 0; c < ch; c++)
-            {
-                pmin[c] = new float[blocks]; pmax[c] = new float[blocks];
-                var src = outp[c];
-                Parallel.For(0, blocks, b =>
-                {
-                    long i0 = (long)b * PeakBlock, i1 = Math.Min(total, i0 + PeakBlock);
-                    float mn = 0, mx = 0;
-                    for (long i = i0; i < i1; i++) { float v = src[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
-                    pmin[c][b] = mn; pmax[c][b] = mx;
-                });
-            }
-            Rendered = outp; RenderedLength = total; PeakMin = pmin; PeakMax = pmax; RenderedVersion = version;
+            Segments = segs; RenderedLength = total; RenderedVersion = version;
         }
 
         public void ClearCache() { lock (segCache) segCache.Clear(); RenderVersion++; }
+
+        // ---------- reading ----------
+        /// <summary>Adds local frames [local0, local0+n) of channel ch into dst[dstOff..] (stride 1). Frames outside the clip are skipped.</summary>
+        public void AddInto(float[] dst, int dstOff, int ch, long local0, int n, int dstStride = 1)
+        {
+            var segs = Segments; var src = Audio.Channels[Math.Min(ch, Audio.ChannelCount - 1)];
+            long end = local0 + n;
+            foreach (var s in segs)
+            {
+                long segEnd = s.LocalStart + s.LocalLen;
+                if (segEnd <= local0 || s.LocalStart >= end) continue;
+                long from = Math.Max(local0, s.LocalStart), to = Math.Min(end, segEnd);
+                if (s.Identity)
+                {
+                    long srcIdx = s.SrcStart + (from - s.LocalStart);
+                    for (long i = from; i < to; i++, srcIdx++) dst[dstOff + (int)(i - local0) * dstStride] += src[srcIdx];
+                }
+                else
+                {
+                    var b = s.Buf[Math.Min(ch, s.Buf.Length - 1)];
+                    long bi = from - s.LocalStart;
+                    for (long i = from; i < to; i++, bi++) dst[dstOff + (int)(i - local0) * dstStride] += b[bi];
+                }
+            }
+        }
+
+        /// <summary>Min/max over local frames [l0, l1) across all channels, using the peak pyramids.</summary>
+        public void Peak(long l0, long l1, out float mn, out float mx)
+        {
+            mn = 0; mx = 0;
+            var segs = Segments;
+            foreach (var s in segs)
+            {
+                long segEnd = s.LocalStart + s.LocalLen;
+                if (segEnd <= l0 || s.LocalStart >= l1) continue;
+                long from = Math.Max(l0, s.LocalStart), to = Math.Min(l1, segEnd);
+                float[][] pmin, pmax; long b0, b1;
+                if (s.Identity)
+                {
+                    pmin = SrcPeakMin; pmax = SrcPeakMax;
+                    b0 = (s.SrcStart + (from - s.LocalStart)) / PeakBlock; b1 = (s.SrcStart + (to - 1 - s.LocalStart)) / PeakBlock;
+                }
+                else
+                {
+                    pmin = s.PeakMin; pmax = s.PeakMax;
+                    b0 = (from - s.LocalStart) / PeakBlock; b1 = (to - 1 - s.LocalStart) / PeakBlock;
+                }
+                if (pmin == null) continue;
+                for (int c = 0; c < pmin.Length; c++)
+                {
+                    var a = pmin[c]; var b = pmax[c];
+                    long hi = Math.Min(b1, a.Length - 1);
+                    for (long k = Math.Max(0, b0); k <= hi; k++) { if (a[k] < mn) mn = a[k]; if (b[k] > mx) mx = b[k]; }
+                }
+            }
+        }
     }
 }

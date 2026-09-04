@@ -2,12 +2,13 @@ using NAudio.Wave;
 
 namespace WavMarker.Sync
 {
-    /// <summary>Mixes all rendered tracks on the shared timeline into a stereo float stream.</summary>
+    /// <summary>Mixes all tracks on the shared timeline into a stereo float stream, reading straight through the segment maps.</summary>
     class SyncMixProvider : ISampleProvider
     {
         readonly List<SyncTrack> tracks;
         readonly long endFrame;
         public long Position;
+        float[] tmp = new float[0];
 
         public SyncMixProvider(List<SyncTrack> tracks, int sampleRate, long startFrame, long endFrame)
         {
@@ -28,15 +29,19 @@ namespace WavMarker.Sync
             foreach (var t in tracks)
             {
                 if (t.Mute || (anySolo && !t.Solo)) continue;
-                var r = t.Rendered; if (r == null) continue;
                 long local0 = Position - t.Offset;
-                int ch = r.Length;
-                for (int i = 0; i < frames; i++)
+                if (local0 + frames <= 0 || local0 >= t.RenderedLength) continue;
+                if (t.Audio.ChannelCount == 1)
                 {
-                    long li = local0 + i;
-                    if (li < 0 || li >= t.RenderedLength) continue;
-                    if (ch == 1) { float v = r[0][li]; buffer[offset + i * 2] += v; buffer[offset + i * 2 + 1] += v; }
-                    else { buffer[offset + i * 2] += r[0][li]; buffer[offset + i * 2 + 1] += r[1][li]; }
+                    if (tmp.Length < frames) tmp = new float[frames];
+                    Array.Clear(tmp, 0, frames);
+                    t.AddInto(tmp, 0, 0, local0, frames);
+                    for (int i = 0; i < frames; i++) { buffer[offset + i * 2] += tmp[i]; buffer[offset + i * 2 + 1] += tmp[i]; }
+                }
+                else
+                {
+                    t.AddInto(buffer, offset, 0, local0, frames, 2);
+                    t.AddInto(buffer, offset + 1, 1, local0, frames, 2);
                 }
             }
             Position += frames;

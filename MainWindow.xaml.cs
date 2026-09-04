@@ -32,6 +32,7 @@ namespace WavMarker
         public byte[][] Data;    // per channel: frames * bins, 0..255 dB-scaled
         public int Frames, Bins, Fft, Hop;
         public float MaxDb;
+        public int[] ChannelOffset;   // per-channel byte offset so all channels share one dB reference
     }
 
     class BufferProvider : ISampleProvider
@@ -314,8 +315,7 @@ namespace WavMarker
             var window = new float[fft];
             for (int i = 0; i < fft; i++) window[i] = (float)FastFourierTransform.HannWindow(i, fft);
             var result = new byte[a.ChannelCount][];
-            var dbAll = new float[a.ChannelCount][];
-            float globalMax = -200;
+            var chMax = new float[a.ChannelCount];
             object lockObj = new();
             for (int c = 0; c < a.ChannelCount; c++)
             {
@@ -338,29 +338,19 @@ namespace WavMarker
                     }
                     return (buf, mx);
                 }, st => { lock (lockObj) { if (st.max > localMax) localMax = st.max; } });
-                dbAll[c] = db;
-                if (localMax > globalMax) globalMax = localMax;
-            }
-            // store relative dB in 0.5 dB steps: 255 = peak, 0 = -127.5 dB
-            for (int c = 0; c < a.ChannelCount; c++)
-            {
-                var db = dbAll[c];
+                chMax[c] = localMax;
+                // quantise this channel straight away (0.5 dB steps relative to its own peak) so only one float buffer is alive at a time
                 var bytes = new byte[db.Length];
-                float gm = globalMax;
                 Parallel.For(0, frames, f =>
                 {
                     long o = (long)f * bins;
-                    for (int b = 0; b < bins; b++)
-                    {
-                        float rel = db[o + b] - gm;
-                        int v = (int)(255 + rel * 2f);
-                        bytes[o + b] = (byte)(v < 0 ? 0 : v);
-                    }
+                    for (int b = 0; b < bins; b++) { int v = (int)(255 + (db[o + b] - localMax) * 2f); bytes[o + b] = (byte)(v < 0 ? 0 : v); }
                 });
                 result[c] = bytes;
-                dbAll[c] = null;
             }
-            return new Spectrogram { Data = result, Frames = frames, Bins = bins, Fft = fft, Hop = hop, MaxDb = globalMax };
+            float globalMax = chMax.Max();
+            var offsets = chMax.Select(mx => (int)Math.Round((mx - globalMax) * 2f)).ToArray();
+            return new Spectrogram { Data = result, Frames = frames, Bins = bins, Fft = fft, Hop = hop, MaxDb = globalMax, ChannelOffset = offsets };
         }
 
         // Audition-style heat map: black -> blue -> purple -> red -> orange -> yellow -> white
@@ -437,6 +427,7 @@ namespace WavMarker
                 for (int c = 0; c < nch; c++)
                 {
                     var data = s.Data[c];
+                    int chOff = s.ChannelOffset[c];
                     int top = c * bandH;
                     for (int y = 0; y < bandH; y++)
                     {
@@ -447,7 +438,7 @@ namespace WavMarker
                             long o = (long)f * bins;
                             for (int b = b0; b <= b1; b++) { int v = data[o + b]; if (v > mx) mx = v; }
                         }
-                        px[(top + y) * W + x] = lut[gain[mx]];
+                        px[(top + y) * W + x] = lut[gain[Math.Max(0, mx + chOff)]];
                     }
                 }
                 for (int c = 1; c < nch; c++) px[(c * bandH) * W + x] = unchecked((int)0xFF404040);

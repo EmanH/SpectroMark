@@ -27,7 +27,7 @@ namespace WavMarker
             int sr = reader.WaveFormat.SampleRate;
             long totalFrames = reader.Length / (reader.WaveFormat.BitsPerSample / 8) / ch;
             var chans = new float[ch][];
-            for (int c = 0; c < ch; c++) chans[c] = new float[totalFrames + 4096];
+            for (int c = 0; c < ch; c++) chans[c] = new float[totalFrames];
             var buf = new float[sr * ch];
             long pos = 0; int n;
             while ((n = reader.Read(buf, 0, buf.Length)) > 0)
@@ -39,7 +39,7 @@ namespace WavMarker
                     for (int c = 0; c < ch; c++) chans[c][pos + i] = buf[i * ch + c];
                 pos += frames;
             }
-            for (int c = 0; c < ch; c++) Array.Resize(ref chans[c], (int)pos);
+            if (pos != chans[0].Length) for (int c = 0; c < ch; c++) Array.Resize(ref chans[c], (int)pos);
             return new AudioData { Channels = chans, SampleRate = sr, Length = pos };
         }
 
