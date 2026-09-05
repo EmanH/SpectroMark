@@ -1007,6 +1007,7 @@ namespace WavMarker
                     draggingMarker = false; MarkDirty();
                     markers.Sort((a, b) => a.Sample.CompareTo(b.Sample)); RefreshMarkerList(); RefreshOverlays();
                 }
+                else if (selectedMarker != null) SeekTo(selectedMarker.Sample);   // plain click: playhead jumps to the marker
             }
             else if (panning && e.ChangedButton == MouseButton.Middle) { panning = false; SpecHost.ReleaseMouseCapture(); }
             else if (scrubbing && e.ChangedButton == MouseButton.Left)

@@ -728,7 +728,7 @@ namespace WavMarker.Sync
                     SetStatus($"Group moved to {FormatTime((double)anchorTime / sampleRate)}");
                     if (!sHeld) { anchorTrack = null; SyncHint.Text = ""; }
                 }
-                else { int lane = LaneAt(e.GetPosition(LaneHost).Y); if (lane >= 0 && selectedLane != lane) { selectedLane = lane; InvalidateLanes(); RebuildHeaders(); } }
+                else { int lane = LaneAt(e.GetPosition(LaneHost).Y); if (lane >= 0 && selectedLane != lane) { selectedLane = lane; InvalidateLanes(); RebuildHeaders(); } SeekTo(groupPressTime); }
                 groupDragging = false; dragGroup = null;
                 return;
             }
@@ -745,7 +745,11 @@ namespace WavMarker.Sync
             if (pressLane >= 0)
             {
                 if (draggingClip) { draggingClip = false; SetStatus($"Moved {tracks[pressLane].Name}"); UpdateScrollBar(); }
-                else SeekTo((long)XToSample(p.X));
+                else
+                {
+                    var (ht, hm) = HitMarker(p);   // clicking a marker lands the playhead exactly on it
+                    SeekTo(hm != null ? ht.SourceToTimeline(hm.Sample) : (long)XToSample(p.X));
+                }
             }
         }
 
