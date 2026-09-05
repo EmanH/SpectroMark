@@ -39,7 +39,7 @@
         <!-- Status / hints -->
         <Border DockPanel.Dock="Bottom" Background="#1e1e1e" Padding="10,3" BorderBrush="#333" BorderThickness="0,1,0,0">
             <TextBlock FontSize="11" Foreground="#888"
-                       Text="Ctrl+Z / Ctrl+Shift+Z: undo / redo   Ctrl+S: save markers into WAV   Space: play / stop and return to start   Enter: play / pause in place   M: drop marker   Home: to start   ←/→: nudge 1s   Delete: remove selected marker   |   Left-click/drag: scrub   Wheel: zoom   Shift+Wheel: pan   Middle-drag: pan   |   Drag a marker to move it"/>
+                       Text="Ctrl+Z / Ctrl+Shift+Z: undo / redo   Ctrl+S: save markers into WAV   Space: play / stop and return to start   Enter: play / pause in place   M: drop marker   Home: to start   ←/→: nudge 1s   Delete: remove selected marker   |   Left-click/drag: scrub   Wheel: zoom on playhead   Shift+Wheel: pan   Middle-drag: pan   |   Drag a marker to move it"/>
         </Border>
         <Grid>
         <Grid x:Name="MarkerRoot">

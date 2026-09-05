@@ -904,13 +904,16 @@ namespace WavMarker
 
         // ---------------- mouse: spectrogram ----------------
 
-        void ZoomAt(double x, double factor)
+        /// <summary>Zoom about the playhead: the view is centred on it, then scaled.</summary>
+        void ZoomAt(double x, double factor) => ZoomOnPlayhead(factor);
+
+        void ZoomOnPlayhead(double factor)
         {
             if (audio == null) return;
-            double anchor = XToSample(x);
+            double centre = CurrentPlaybackSample();
             viewLen /= factor;
             viewLen = Math.Clamp(viewLen, audio.SampleRate * 0.2, audio.Length);
-            viewStart = anchor - x / SpecW * viewLen;
+            viewStart = centre - viewLen / 2;
             ViewChanged();
         }
 

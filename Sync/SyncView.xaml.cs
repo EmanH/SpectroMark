@@ -516,11 +516,14 @@ namespace WavMarker.Sync
 
         void HScroll_Scroll(object sender, ScrollEventArgs e) { viewStart = e.NewValue; ViewChanged(); }
 
-        void ZoomAt(double x, double factor)
+        /// <summary>Zoom about the playhead: the view is centred on it, then scaled.</summary>
+        void ZoomAt(double x, double factor) => ZoomOnPlayhead(factor);
+
+        void ZoomOnPlayhead(double factor)
         {
-            double anchor = XToSample(x);
+            double centre = CurrentSample();
             viewLen /= factor;
-            viewStart = anchor - x / LaneW * viewLen;
+            viewStart = centre - viewLen / 2;
             ViewChanged();
         }
 
