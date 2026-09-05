@@ -7,7 +7,7 @@
   "targets": {
     ".NETCoreApp,Version=v10.0": {},
     ".NETCoreApp,Version=v10.0/win-x64": {
-      "SpectroMark/1.5.0": {
+      "SpectroMark/2.0.0": {
         "dependencies": {
           "NAudio": "2.2.1",
           "SoundTouch.Net": "2.3.2"
@@ -106,7 +106,7 @@
     }
   },
   "libraries": {
-    "SpectroMark/1.5.0": {
+    "SpectroMark/2.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""
