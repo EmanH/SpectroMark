@@ -683,6 +683,14 @@ namespace WavMarker
             PlayBtn.Content = "Pause  (Space)";
         }
 
+        /// <summary>Stop and return the playhead to where playback started (Space).</summary>
+        void StopAndReturn()
+        {
+            if (!playing) return;
+            StopPlayback();
+            SeekTo(playStartSample); EnsurePlayheadVisible();
+        }
+
         void StopPlayback()
         {
             if (playing) playhead = CurrentPlaybackSample();
@@ -872,7 +880,8 @@ namespace WavMarker
             bool shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
             switch (e.Key)
             {
-                case Key.Space: TogglePlay(); e.Handled = true; break;
+                case Key.Space: if (playing) StopAndReturn(); else StartPlayback(); e.Handled = true; break;
+                case Key.Enter: if (playing) StopPlayback(); else StartPlayback(); e.Handled = true; break;
                 case Key.M: DropMarker(); e.Handled = true; break;
                 case Key.Home: SeekTo(0); viewStart = 0; ViewChanged(); e.Handled = true; break;
                 case Key.End: SeekTo(audio.Length); viewStart = audio.Length - viewLen; ViewChanged(); e.Handled = true; break;

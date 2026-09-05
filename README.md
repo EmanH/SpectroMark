@@ -37,7 +37,8 @@ Switch to **Sync** in the toolbar to line up several takes against each other.
 ## Keys
 | Key | Action |
 |---|---|
-| Space | Play / pause |
+| Space | Play / stop and return to where playback started |
+| Enter | Play / pause in place |
 | M | Drop marker at playhead |
 | Home / End | Jump to start / end |
 | ← / → | Nudge 1 s (Shift: 0.1 s) |

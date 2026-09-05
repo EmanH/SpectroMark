@@ -540,6 +540,14 @@ namespace WavMarker.Sync
             playing = true; timer.Start(); PlayBtn.Content = "Pause  (Space)";
         }
 
+        /// <summary>Stop and return the playhead to where playback started (Space).</summary>
+        void StopAndReturn()
+        {
+            if (!playing) return;
+            StopPlayback();
+            SeekTo(playStart);
+        }
+
         public void StopPlayback()
         {
             if (playing) playhead = CurrentSample();
@@ -591,7 +599,8 @@ namespace WavMarker.Sync
             bool ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control), shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
             switch (e.Key)
             {
-                case Key.Space: TogglePlay(); return true;
+                case Key.Space: if (tracks.Count == 0) return true; if (playing) StopAndReturn(); else StartPlayback(); return true;
+                case Key.Enter: if (tracks.Count == 0) return true; if (playing) StopPlayback(); else StartPlayback(); return true;
                 case Key.M: AddMarkerToSelected(); return true;
                 case Key.Delete: DeleteHoveredMarker(); return true;
                 case Key.S when ctrl && shift: SaveSession(true); return true;
