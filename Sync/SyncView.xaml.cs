@@ -179,10 +179,18 @@ namespace WavMarker.Sync
                 var panel = new StackPanel { Margin = new Thickness(6, 4, 4, 0) };
                 panel.Children.Add(new TextBlock { Text = t.Name, Foreground = new SolidColorBrush(col), FontWeight = FontWeights.Bold, TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = t.Path });
                 var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
-                var mute = new ToggleButton { Content = "M", Width = 26, Padding = new Thickness(0, 2, 0, 2), IsChecked = t.Mute, ToolTip = "Mute" };
-                mute.Click += (_, _) => { t.Mute = mute.IsChecked == true; InvalidateLanes(); };
-                var solo = new ToggleButton { Content = "S", Width = 26, Padding = new Thickness(0, 2, 0, 2), IsChecked = t.Solo, Margin = new Thickness(3, 0, 0, 0), ToolTip = "Solo" };
-                solo.Click += (_, _) => { t.Solo = solo.IsChecked == true; InvalidateLanes(); };
+                var mute = new ToggleButton { Content = "M", Width = 26, Padding = new Thickness(0, 2, 0, 2), IsChecked = t.Mute, ToolTip = "Mute   (Ctrl+click: unmute all)" };
+                mute.Click += (_, _) =>
+                {
+                    if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) { foreach (var o in tracks) o.Mute = false; RebuildHeaders(); InvalidateLanes(); SetStatus("All lanes unmuted"); return; }
+                    t.Mute = mute.IsChecked == true; InvalidateLanes();
+                };
+                var solo = new ToggleButton { Content = "S", Width = 26, Padding = new Thickness(0, 2, 0, 2), IsChecked = t.Solo, Margin = new Thickness(3, 0, 0, 0), ToolTip = "Solo   (Ctrl+click: unsolo all)" };
+                solo.Click += (_, _) =>
+                {
+                    if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) { foreach (var o in tracks) o.Solo = false; RebuildHeaders(); InvalidateLanes(); SetStatus("All lanes unsoloed"); return; }
+                    t.Solo = solo.IsChecked == true; InvalidateLanes();
+                };
                 var rm = new Button { Content = "✕", Width = 26, Margin = new Thickness(3, 0, 0, 0), Padding = new Thickness(0, 2, 0, 2), ToolTip = "Remove clip" };
                 rm.Click += (_, _) => RemoveTrack(t);
                 row.Children.Add(mute); row.Children.Add(solo); row.Children.Add(rm);

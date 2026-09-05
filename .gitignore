@@ -4,3 +4,4 @@ obj/
 .vs/
 tools/**/bin/
 tools/**/obj/
+publish/
