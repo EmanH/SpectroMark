@@ -1,3 +1,4 @@
+using System.Threading;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
@@ -1087,33 +1088,96 @@ namespace WavMarker.Sync
             StopPlayback();
             long end = EndFrame; int sr = sampleRate;
             var snapshot = tracks.ToList();
+            int total = snapshot.Count + 1;                     // every lane plus the MIX
+            exportCts = new CancellationTokenSource(); var ct = exportCts.Token;
+            ShowProgress(true); UpdateProgress(0, "Preparing...");
             SetStatus("Exporting...");
-            await Task.Run(() =>
+            var written = new List<string>();
+            bool cancelled = false; string error = null;
+            try
             {
-                foreach (var t in snapshot)
+                await Task.Run(() =>
                 {
-                    string outp = System.IO.Path.Combine(dir, t.Name + "_synced.wav");
-                    WriteWav24(outp, sr, t.Audio.ChannelCount, end, t);
-                    var mk = t.Markers.Select(m => new Marker { Sample = t.SourceToTimeline(m.Sample), Name = m.Name }).Where(m => m.Sample >= 0 && m.Sample < end).ToList();
-                    try { WavCues.Write(outp, mk); } catch { }
-                }
-                var mix = new SyncMixProvider(snapshot, sr, 0, end);
-                string mixPath = System.IO.Path.Combine(dir, "MIX_synced.wav");
-                var buf = new float[8192 * 2];
-                using var w = new WaveFileWriter(mixPath, new WaveFormat(sr, 24, 2));
-                int n;
-                var bytes = new byte[buf.Length * 3];
-                while ((n = mix.Read(buf, 0, buf.Length)) > 0)
-                {
-                    int nb = 0;
-                    for (int i = 0; i < n; i++) { int v = (int)Math.Round(Math.Clamp(buf[i], -1f, 1f) * 8388607f); bytes[nb++] = (byte)v; bytes[nb++] = (byte)(v >> 8); bytes[nb++] = (byte)(v >> 16); }
-                    w.Write(bytes, 0, nb);
-                }
-            });
+                    int idx = 0;
+                    foreach (var t in snapshot)
+                    {
+                        string outp = System.IO.Path.Combine(dir, t.Name + "_synced.wav");
+                        int fileIdx = idx;
+                        written.Add(outp);
+                        WriteWav24(outp, sr, t.Audio.ChannelCount, end, t, ct, f => Report((fileIdx + f) / total, $"{fileIdx + 1} of {total}   {t.Name}_synced.wav"));
+                        var mk = t.Markers.Select(m => new Marker { Sample = t.SourceToTimeline(m.Sample), Name = m.Name }).Where(m => m.Sample >= 0 && m.Sample < end).ToList();
+                        try { WavCues.Write(outp, mk); } catch { }
+                        idx++;
+                    }
+                    var mix = new SyncMixProvider(snapshot, sr, 0, end);
+                    string mixPath = System.IO.Path.Combine(dir, "MIX_synced.wav");
+                    written.Add(mixPath);
+                    var buf = new float[8192 * 2];
+                    using var w = new WaveFileWriter(mixPath, new WaveFormat(sr, 24, 2));
+                    int n; long done = 0;
+                    var bytes = new byte[buf.Length * 3];
+                    while ((n = mix.Read(buf, 0, buf.Length)) > 0)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        int nb = 0;
+                        for (int i = 0; i < n; i++) { int v = (int)Math.Round(Math.Clamp(buf[i], -1f, 1f) * 8388607f); bytes[nb++] = (byte)v; bytes[nb++] = (byte)(v >> 8); bytes[nb++] = (byte)(v >> 16); }
+                        w.Write(bytes, 0, nb);
+                        done += n / 2;
+                        Report((snapshot.Count + (double)done / Math.Max(1, end)) / total, $"{total} of {total}   MIX_synced.wav");
+                    }
+                }, ct);
+            }
+            catch (OperationCanceledException) { cancelled = true; }
+            catch (Exception ex) { error = ex.Message; }
+            ShowProgress(false);
+            exportCts = null;
+            if (cancelled || error != null)
+            {
+                // remove half-written files
+                foreach (var f in written) try { File.Delete(f); } catch { }
+                if (cancelled) SetStatus("Export cancelled");
+                else Warn("Export failed: " + error);
+                return;
+            }
             SetStatus($"Exported {snapshot.Count} synced WAV(s) + MIX_synced.wav to {dir}");
         }
 
-        static void WriteWav24(string path, int sr, int ch, long frames, SyncTrack t)
+        // ---------------- export progress ----------------
+
+        CancellationTokenSource exportCts;
+        DateTime lastProgressUi;
+
+        void Report(double frac, string detail)
+        {
+            // throttle UI updates from the worker thread to ~30/s
+            var now = DateTime.UtcNow;
+            if (frac < 1 && (now - lastProgressUi).TotalMilliseconds < 33) return;
+            lastProgressUi = now;
+            Dispatcher.BeginInvoke(() => UpdateProgress(frac, detail));
+        }
+
+        void ShowProgress(bool on)
+        {
+            ProgressOverlay.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+            ProgressCancel.IsEnabled = true; ProgressCancel.Content = "Cancel";
+        }
+
+        void UpdateProgress(double frac, string detail)
+        {
+            frac = Math.Clamp(frac, 0, 1);
+            double w = ProgressTrack.ActualWidth - 2;
+            ProgressFill.Width = Math.Max(0, w * frac);
+            ProgressPct.Text = $"{frac * 100:0}%";
+            ProgressDetail.Text = detail;
+        }
+
+        void ProgressCancel_Click(object sender, RoutedEventArgs e)
+        {
+            exportCts?.Cancel();
+            ProgressCancel.IsEnabled = false; ProgressCancel.Content = "Cancelling...";
+        }
+
+        static void WriteWav24(string path, int sr, int ch, long frames, SyncTrack t, CancellationToken ct = default, Action<double> progress = null)
         {
             using var w = new WaveFileWriter(path, new WaveFormat(sr, 24, ch));
             const int blk = 8192;
@@ -1121,6 +1185,8 @@ namespace WavMarker.Sync
             var fl = new float[blk * ch];
             for (long i0 = 0; i0 < frames; i0 += blk)
             {
+                ct.ThrowIfCancellationRequested();
+                progress?.Invoke((double)i0 / Math.Max(1, frames));
                 int n = (int)Math.Min(blk, frames - i0);
                 Array.Clear(fl, 0, n * ch);
                 long local0 = i0 - t.Offset;

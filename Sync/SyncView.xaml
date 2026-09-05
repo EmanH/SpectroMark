@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:WavMarker.Sync"
              Background="#141414" Focusable="True">
+  <Grid>
     <DockPanel>
         <Border DockPanel.Dock="Top" Background="#1e1e1e" Padding="10,6" BorderBrush="#333" BorderThickness="0,0,0,1">
             <StackPanel Orientation="Horizontal">
@@ -59,4 +60,22 @@
             <ScrollBar Grid.Row="3" Grid.Column="1" x:Name="HScroll" Orientation="Horizontal" Scroll="HScroll_Scroll"/>
         </Grid>
     </DockPanel>
+    <!-- export progress overlay -->
+    <Grid x:Name="ProgressOverlay" Background="#A0000000" Visibility="Collapsed">
+        <Border Background="#1e1e1e" BorderBrush="#444" BorderThickness="1" CornerRadius="6" Padding="22,18" MinWidth="440" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <StackPanel>
+                <TextBlock x:Name="ProgressTitle" Text="Exporting synced WAVs" FontSize="15" FontWeight="SemiBold" Foreground="#eee"/>
+                <TextBlock x:Name="ProgressDetail" Text="" Foreground="#aaa" Margin="0,6,0,10"/>
+                <Grid x:Name="ProgressTrack" Height="14">
+                    <Border Background="#0c0c0c" BorderBrush="#333" BorderThickness="1" CornerRadius="7"/>
+                    <Border x:Name="ProgressFill" Background="#4FB3E8" CornerRadius="7" HorizontalAlignment="Left" Width="0" Margin="1"/>
+                </Grid>
+                <DockPanel Margin="0,10,0,0">
+                    <TextBlock x:Name="ProgressPct" Text="0%" Foreground="#ccc" VerticalAlignment="Center"/>
+                    <Button x:Name="ProgressCancel" Content="Cancel" HorizontalAlignment="Right" Click="ProgressCancel_Click" Padding="14,3"/>
+                </DockPanel>
+            </StackPanel>
+        </Border>
+    </Grid>
+  </Grid>
 </UserControl>
